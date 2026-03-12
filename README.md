@@ -143,7 +143,7 @@ requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
 ## Screenshots
 
 ### Minimal UI
-![ACP Minimal UI](https://via.placeholder.com/800x400/0d1117/e6edf3?text=ACP+Minimal+Dashboard)
+![ACP Minimal UI](https://github.com/VTSTech/ACP-Agent-Control-Panel/blob/main/acp-minimal.py)
 
 Dark theme dashboard showing:
 - Token usage with progress bar
