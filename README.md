@@ -51,6 +51,7 @@ The full implementation includes everything in minimal plus:
 | **v1.0.1** Activity Metadata | Arbitrary key-value pairs for custom context |
 | **v1.0.1** Content Size | Accurate token tracking for native tools |
 | **v1.0.1** Activity Lookup | GET /api/activity/{id} endpoint |
+| **v1.0.1** Activity Hints | Contextual hints in /api/action response |
 
 ## API Reference
 
