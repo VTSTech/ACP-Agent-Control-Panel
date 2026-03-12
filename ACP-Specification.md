@@ -1,6 +1,6 @@
 # Agent Control Panel (ACP) Specification
 
-**Version:** 1.0.0  
+**Version:** 1.0.1  
 **Status:** Draft  
 **Authors:** VTSTech, Community Contributors
 
@@ -170,6 +170,31 @@ interface Activity {
   result?: string;         // Result summary (max 500 chars)
   error?: string;          // Error message (max 200 chars)
   duration_ms?: number;    // Duration in milliseconds
+  priority?: Priority;     // v1.0.1: high | medium | low (default: medium)
+  metadata?: object;       // v1.0.1: Arbitrary key-value pairs
+}
+```
+
+### 3.2.1 Priority Levels
+
+| Priority | When to Use |
+|----------|-------------|
+| `high` | Critical operations, user-requested tasks, blocking dependencies |
+| `medium` | Normal operations (default) |
+| `low` | Background tasks, optional enhancements, non-urgent |
+
+### 3.2.2 Metadata
+
+Arbitrary key-value pairs for attaching custom context:
+
+```json
+{
+  "metadata": {
+    "file_hash": "abc123",
+    "source": "user_request",
+    "related_file": "/path/to/related.py",
+    "retry_count": 2
+  }
 }
 ```
 
@@ -305,6 +330,33 @@ Convenience endpoint that returns status, running, history, and tokens in one ca
 }
 ```
 
+#### GET /api/activity/{activity_id}
+
+**v1.0.1** Get a single activity by ID.
+
+**Response:**
+```json
+{
+  "success": true,
+  "activity": {
+    "id": "143052-a1b2c3",
+    "action": "READ",
+    "target": "/path/to/file.py",
+    "status": "completed",
+    "priority": "high",
+    "metadata": {"source": "user_request"}
+  }
+}
+```
+
+**Error Response:**
+```json
+{
+  "success": false,
+  "error": "Activity not found"
+}
+```
+
 #### POST /api/start
 
 Start a new activity.
@@ -314,9 +366,22 @@ Start a new activity.
 {
   "action": "READ",
   "target": "/path/to/file.py",
-  "details": "Reading configuration file"
+  "details": "Reading configuration file",
+  "content_size": 35000,
+  "priority": "high",
+  "metadata": {"source": "user_request"}
 }
 ```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | Action type (READ, WRITE, EDIT, BASH, etc.) |
+| `target` | string | Yes | File path, command, or resource identifier |
+| `details` | string | No | Human-readable description |
+| `content_size` | integer | No | **v1.0.1** Character count of content read/consumed |
+| `priority` | string | No | **v1.0.1** Activity priority: `high`, `medium` (default), `low` |
+| `metadata` | object | No | **v1.0.1** Arbitrary key-value pairs |
 
 **Response:**
 ```json
@@ -345,9 +410,20 @@ Complete an activity.
 ```json
 {
   "activity_id": "143052-a1b2c3",
-  "result": "File read successfully, 150 lines"
+  "result": "File read successfully, 150 lines",
+  "content_size": 5000,
+  "metadata": {"file_hash": "abc123"}
 }
 ```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `activity_id` | string | Yes | ID of activity to complete |
+| `result` | string | No | Result summary (max 500 chars) |
+| `error` | string | No | Error message if failed (max 200 chars) |
+| `content_size` | integer | No | **v1.0.1** Character count of content written/generated |
+| `metadata` | object | No | **v1.0.1** Additional metadata (merged with existing) |
 
 **Error Response:**
 ```json
@@ -366,11 +442,31 @@ Combined endpoint: complete previous + start new in one call.
 {
   "complete_id": "143052-a1b2c3",
   "result": "Previous action completed",
+  "complete_content_size": 5000,
+  "complete_metadata": {"file_hash": "abc123"},
   "action": "READ",
   "target": "/path/to/next/file.py",
-  "details": "Reading next file"
+  "details": "Reading next file",
+  "content_size": 35000,
+  "priority": "high",
+  "metadata": {"source": "user_request"}
 }
 ```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `complete_id` | string | No | ID of previous activity to complete |
+| `result` | string | No | Result summary for previous activity |
+| `error` | string | No | Error message if previous activity failed |
+| `complete_content_size` | integer | No | **v1.0.1** Character count written in previous activity |
+| `complete_metadata` | object | No | **v1.0.1** Metadata to merge into previous activity |
+| `action` | string | Yes | Action type for new activity |
+| `target` | string | Yes | Target for new activity |
+| `details` | string | No | Description for new activity |
+| `content_size` | integer | No | **v1.0.1** Character count to be read in new activity |
+| `priority` | string | No | **v1.0.1** Priority for new activity |
+| `metadata` | object | No | **v1.0.1** Metadata for new activity |
 
 **Response:**
 ```json
@@ -936,8 +1032,43 @@ This is tuned for mixed code/prose content and provides a conservative estimate.
 | Source | How Tracked | Notes |
 |--------|-------------|-------|
 | `/api/action` | Input tokens from action + target + details | Logged BEFORE executing |
+| `/api/action` + `content_size` | **v1.0.1** Input tokens from native tool reads | Character count / 3.5 |
 | `/api/complete` | Output tokens from result | Logged AFTER executing |
+| `/api/complete` + `content_size` | **v1.0.1** Output tokens from native tool writes | Character count / 3.5 |
 | `/api/files/view` | File content tokens | Deduplicated per session |
+
+### 8.4 Native Tool Token Tracking (v1.0.1)
+
+When agents use native tools (Read, Write, Edit) instead of ACP's `/api/files/*` endpoints, token tracking is not automatic. To ensure accurate tracking, include the `content_size` parameter:
+
+**For READ operations:**
+```json
+POST /api/action {
+  "action": "READ",
+  "target": "/path/to/file.py",
+  "content_size": 35000
+}
+```
+
+**For WRITE/EDIT operations:**
+```json
+POST /api/complete {
+  "activity_id": "abc123",
+  "result": "File written",
+  "content_size": 5000
+}
+```
+
+**Combined workflow:**
+```json
+POST /api/action {
+  "complete_id": "prev-id",
+  "complete_content_size": 5000,
+  "action": "READ",
+  "target": "/next/file.py",
+  "content_size": 35000
+}
+```
 
 ---
 
@@ -986,7 +1117,19 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 
 ## Appendix B: Changelog
 
-### v1.0.0 (Current)
+### v1.0.1 (Current)
+- **NEW**: `content_size` parameter for `/api/start`, `/api/complete`, `/api/action`
+- **NEW**: `complete_content_size` parameter for `/api/action` (combined endpoint)
+- **NEW**: Activity `priority` field (`high` | `medium` | `low`)
+- **NEW**: Activity `metadata` field for arbitrary key-value pairs
+- **NEW**: `GET /api/activity/{id}` endpoint for single activity lookup
+- **FIX**: Accurate token tracking for agents using native Read/Write/Edit tools
+- **DOC**: Added §3.2.1 Priority Levels section
+- **DOC**: Added §3.2.2 Metadata section
+- **DOC**: Added §8.4 Native Tool Token Tracking section
+- **DOC**: Added parameter tables to API endpoint documentation
+
+### v1.0.0
 - Initial specification release
 - Activity monitoring with LOG → DO → COMPLETE workflow
 - Token estimation and context window tracking

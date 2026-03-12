@@ -47,6 +47,10 @@ The full implementation includes everything in minimal plus:
 | **Configurable Context Window** | Environment variable `GLMACP_CONTEXT_WINDOW` |
 | **File Token Deduplication** | Don't double-count re-read files |
 | **Seamless Restarts** | SO_REUSEPORT for zero-downtime reload |
+| **v1.0.1** Activity Priority | `high` \| `medium` \| `low` priority field |
+| **v1.0.1** Activity Metadata | Arbitrary key-value pairs for custom context |
+| **v1.0.1** Content Size | Accurate token tracking for native tools |
+| **v1.0.1** Activity Lookup | GET /api/activity/{id} endpoint |
 
 ## API Reference
 
@@ -60,6 +64,7 @@ The full implementation includes everything in minimal plus:
 | POST | `/api/resume` | Clear stop flag |
 | GET | `/api/history` | Get activity history |
 | POST | `/api/reset` | Clear all session data |
+| GET | `/api/activity/{id}` | **v1.0.1** Get single activity by ID |
 
 ### Extended Endpoints (Full Version)
 
@@ -68,6 +73,19 @@ The full implementation includes everything in minimal plus:
 | GET | `/api/files` | List files accessed |
 | GET | `/api/files/view` | View file content with token count |
 | GET | `/api/changelog` | Get version history |
+| GET | `/api/summary` | Get session summary for context recovery |
+| POST | `/api/notes/add` | Add note for context recovery |
+
+### Action Parameters (v1.0.1)
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `action` | string | Action type (required) |
+| `target` | string | File path, command, or resource (required) |
+| `details` | string | Human-readable description |
+| `content_size` | integer | Character count for accurate token tracking |
+| `priority` | string | `high` \| `medium` \| `low` (default: medium) |
+| `metadata` | object | Arbitrary key-value pairs |
 
 ### Action Types
 
@@ -106,21 +124,25 @@ if status["stop_flag"]:
     print(f"Stop requested: {status['stop_reason']}")
     exit(1)
 
-# 2. Log action start
+# 2. Log action start (v1.0.1: include content_size, priority, metadata)
 resp = requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
     "action": "READ",
     "target": "/home/user/project/main.py",
-    "details": "Reading source file"
+    "details": "Reading source file",
+    "priority": "high",
+    "metadata": {"source": "user_request"}
 })
 activity_id = resp.json()["activity_id"]
 
 # 3. Execute
 content = open("/home/user/project/main.py").read()
 
-# 4. Complete
+# 4. Complete (v1.0.1: include content_size for accurate token tracking)
 requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
     "complete_id": activity_id,
-    "result": f"Read {len(content)} bytes"
+    "result": f"Read {len(content)} bytes",
+    "complete_content_size": len(content),
+    "complete_metadata": {"lines": content.count(chr(10))}
 })
 ```
 
@@ -137,13 +159,13 @@ requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
 
 ## Documentation
 
-- **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.0)
-- **[ACP-Agent-Guide.md](./ACP-Agent-Guide.md)** - Quick integration guide for agents
+- **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.1)
+- **[ACP-Agent-Guide.md](./ACP-Agent-Guide.md)** - Quick integration guide for agents (Draft 1.1)
 
 ## Screenshots
 
 ### Minimal UI
-![ACP Minimal UI](https://via.placeholder.com/800x400/0d1117/e6edf3?text=ACP+Minimal+Dashboard)
+![ACP Minimal UI](https://github.com/VTSTech/ACP-Agent-Control-Panel/blob/main/acp-minimal.py)
 
 Dark theme dashboard showing:
 - Token usage with progress bar

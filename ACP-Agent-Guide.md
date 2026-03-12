@@ -1,6 +1,6 @@
 # ACP Agent Quick Reference
 
-**Version:** Draft 1.0 | **Spec:** See ACP-Specification.md for full details
+**Version:** Draft 1.0.1 | **Spec:** See ACP-Specification.md for full details
 
 ---
 
@@ -21,9 +21,9 @@
 
 ```
 1. CHECK STATUS → GET /api/status (if stop_flag=true, STOP)
-2. LOG ACTION   → POST /api/action {action, target, details}
+2. LOG ACTION   → POST /api/action {action, target, details, content_size}
 3. EXECUTE      → Do the action
-4. COMPLETE     → POST /api/complete {activity_id, result}
+4. COMPLETE     → POST /api/complete {activity_id, result, content_size}
 ```
 
 ### Combined Workflow (Recommended)
@@ -33,9 +33,11 @@
 POST /api/action {
   "complete_id": "prev_activity_id",   # Complete previous
   "result": "Previous result here",     # Previous result
+  "complete_content_size": 5000,        # v1.0.1: Chars written in prev
   "action": "READ",                     # New action
   "target": "/path/to/file",
-  "details": "Purpose of this action"
+  "details": "Purpose of this action",
+  "content_size": 35000                 # v1.0.1: Chars to be read
 }
 → {activity_id, stop_flag, session_tokens, tokens_remaining}
 ```
@@ -53,6 +55,41 @@ POST /api/action {
 | `SEARCH` | Web search, grep, find | Query + results |
 | `TODO` | TODO state changes | Minimal |
 
+### Activity Priority (v1.0.1)
+
+Mark activities with priority for better organization:
+
+```bash
+POST /api/action {
+  "action": "READ",
+  "target": "/critical/config.py",
+  "priority": "high"  # high | medium (default) | low
+}
+```
+
+### Activity Metadata (v1.0.1)
+
+Attach arbitrary context to activities:
+
+```bash
+POST /api/action {
+  "action": "READ",
+  "target": "/file.py",
+  "metadata": {
+    "file_hash": "abc123",
+    "source": "user_request",
+    "related_to": "issue-42"
+  }
+}
+
+# Metadata can be added on complete too
+POST /api/complete {
+  "activity_id": "abc123",
+  "result": "Done",
+  "metadata": {"bytes_written": 5000}
+}
+```
+
 ### Example: File Read
 
 ```bash
@@ -60,7 +97,9 @@ POST /api/action {
 POST /api/action {
   "action": "READ",
   "target": "/src/config.py",
-  "details": "Loading application configuration"
+  "details": "Loading application configuration",
+  "priority": "high",
+  "content_size": 5000
 }
 → {"activity_id": "143052-a1b2c3", ...}
 
@@ -217,8 +256,30 @@ POST /api/resume
 | Source | How Tracked |
 |--------|-------------|
 | `/api/action` | Input tokens from action + target + details |
+| `/api/action` + `content_size` | **v1.0.1** Native tool reads (chars / 3.5) |
 | `/api/complete` | Output tokens from result |
+| `/api/complete` + `content_size` | **v1.0.1** Native tool writes (chars / 3.5) |
 | `/api/files/view` | File content tokens (deduplicated per session) |
+
+### Native Tool Tracking (v1.0.1)
+
+When using native Read/Write/Edit tools, include `content_size` for accurate tracking:
+
+```bash
+# After reading 35,000 chars with native Read tool:
+POST /api/action {
+  "action": "READ",
+  "target": "/file.py",
+  "content_size": 35000   # 35,000 / 3.5 = 10,000 tokens
+}
+
+# After writing 5,000 chars with native Write tool:
+POST /api/complete {
+  "activity_id": "abc123",
+  "result": "Written",
+  "content_size": 5000    # 5,000 / 3.5 = 1,428 tokens
+}
+```
 
 ---
 
@@ -349,6 +410,7 @@ GET /api/csrf-token
 ├─────────────────────────────────────────────────────────────┤
 │  □ Check status before starting (GET /api/status)           │
 │  □ Log action BEFORE executing (POST /api/action)           │
+│  □ Include content_size for native tools (v1.0.1)           │
 │  □ Log shell commands AFTER executing (POST /api/shell/add) │
 │  □ Complete activity when done (POST /api/complete)         │
 │  □ Sync TODOs on change (POST /api/todos/update)            │
@@ -357,6 +419,19 @@ GET /api/csrf-token
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### v1.0.1 Quick Additions
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  NEW IN v1.0.1                                               │
+├─────────────────────────────────────────────────────────────┤
+│  • priority: "high" | "medium" | "low"                       │
+│  • metadata: {arbitrary: "key-value pairs"}                  │
+│  • GET /api/activity/{id} - Single activity lookup           │
+│  • content_size: Character count for token tracking          │
+└─────────────────────────────────────────────────────────────┘
+```
+
 ---
 
-*ACP Agent Guide - Draft 1.0*
+*ACP Agent Guide - Draft 1.0.1*
