@@ -429,8 +429,34 @@ GET /api/csrf-token
 │  • metadata: {arbitrary: "key-value pairs"}                  │
 │  • GET /api/activity/{id} - Single activity lookup           │
 │  • content_size: Character count for token tracking          │
+│  • hints: Contextual hints in /api/action response           │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### Activity Hints (v1.0.1)
+
+When you call `/api/action`, the response may include `hints`:
+
+```bash
+POST /api/action {"action": "EDIT", "target": "/file.py"}
+→ {
+  "activity_id": "xxx",
+  "hints": {
+    "modified_this_session": true,      # File already touched
+    "modification_count": 3,             # Accessed 3 times
+    "last_action": "READ",               # Last was READ
+    "related_todos": [{"id": "1", "content": "Fix file.py"}],
+    "loop_detected": true,               # Same action repeated 3+ times
+    "suggestion": "Consider if this is intentional"
+  }
+}
+```
+
+**Use hints to:**
+- Avoid redundant operations (check `modified_this_session`)
+- Find related TODOs (check `related_todos`)
+- Break out of loops (check `loop_detected`)
+- Learn from past errors (check `recent_errors`, `last_error`)
 
 ---
 

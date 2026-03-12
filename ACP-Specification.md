@@ -481,9 +481,33 @@ Combined endpoint: complete previous + start new in one call.
   "tokens_percent": 22.6,
   "overflow_warning": null,
   "session": { "<SessionInfo>" },
-  "running_count": 1
+  "running_count": 1,
+  "hints": {
+    "modified_this_session": true,
+    "modification_count": 3,
+    "last_action": "EDIT",
+    "related_todos": [{"id": "1", "content": "Fix bug in file.py", "status": "pending"}],
+    "active_todos": 2
+  }
 }
 ```
+
+### Activity Hints (v1.0.1)
+
+The `hints` field provides contextual information to help agents make better decisions:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `modified_this_session` | boolean | Target was already modified this session |
+| `modification_count` | integer | Number of times target was accessed |
+| `last_action` | string | Last action type on this target |
+| `recent_errors` | integer | Count of recent errors on this target |
+| `last_error` | string | Most recent error message |
+| `related_todos` | array | TODOs mentioning this target |
+| `loop_detected` | boolean | Same target+action repeated 3+ times |
+| `loop_count` | integer | Number of repetitions if loop detected |
+| `suggestion` | string | Actionable advice when patterns detected |
+| `active_todos` | integer | Count of in-progress TODOs |
 
 #### POST /api/stop
 
@@ -1123,6 +1147,7 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 - **NEW**: Activity `priority` field (`high` | `medium` | `low`)
 - **NEW**: Activity `metadata` field for arbitrary key-value pairs
 - **NEW**: `GET /api/activity/{id}` endpoint for single activity lookup
+- **NEW**: Activity Hints - contextual information returned in `/api/action` response
 - **FIX**: Accurate token tracking for agents using native Read/Write/Edit tools
 - **DOC**: Added §3.2.1 Priority Levels section
 - **DOC**: Added §3.2.2 Metadata section
