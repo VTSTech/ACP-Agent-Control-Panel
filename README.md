@@ -1,1010 +1,205 @@
-# Agent Control Panel (ACP) Specification
+# ACP - Agent Control Panel
 
-**Version:** 1.0.0  
-**Status:** Draft  
-**Authors:** VTSTech, Community Contributors
+A lightweight monitoring and observability sidecar for AI agents. Provides real-time tracking of agent activities, token usage, shell commands, and task management through a web UI and REST API.
 
----
+## Quick Start
 
-## Abstract
+```bash
+# Minimal version (single file, ~400 lines)
+python acp-minimal.py
 
-The Agent Control Panel (ACP) is a monitoring and observability protocol for AI agents. Unlike communication protocols (MCP, A2A) that connect agents to tools or other agents, ACP provides a standardized way to monitor, control, and recover AI agent sessions through a RESTful HTTP API.
-
----
-
-## Table of Contents
-
-1. [Introduction](#1-introduction)
-2. [Architecture](#2-architecture)
-3. [Data Model](#3-data-model)
-4. [API Specification](#4-api-specification)
-5. [Agent Workflow](#5-agent-workflow)
-6. [Context Recovery](#6-context-recovery)
-7. [Security](#7-security)
-8. [Configuration](#8-configuration)
-9. [Implementation Guide](#9-implementation-guide)
-
----
-
-## 1. Introduction
-
-### 1.1 Purpose
-
-ACP solves the observability problem for AI agents by providing:
-
-- **Activity Tracking**: Real-time monitoring of agent actions
-- **Token Management**: Context window usage estimation
-- **Control Mechanism**: Emergency stop capability
-- **Context Recovery**: Session state preservation across context compressions
-- **TODO Management**: Task tracking for agents
-- **Shell History**: Terminal command logging
-- **File Management**: Integrated file browser for workspace access
-
-### 1.2 Design Principles
-
-1. **Sidecar Architecture**: ACP runs alongside the agent, not between agent and user
-2. **RESTful API**: Simple HTTP interface, language-agnostic
-3. **Stateless Server**: All state persisted to storage, server can restart safely
-4. **Log-First Workflow**: Agents must log actions BEFORE executing them
-5. **Self-Contained**: No external dependencies required
-6. **Mandatory Integration**: Agents MUST log actions, shell commands, and TODO changes
-
-### 1.3 Comparison to Other Protocols
-
-| Feature | ACP | MCP | A2A | OpenTelemetry |
-|---------|-----|-----|-----|---------------|
-| Purpose | Monitoring | Tool Injection | Inter-Agent | Telemetry |
-| Direction | Sidecar | Agent↔Tool | Agent↔Agent | Agent→Backend |
-| Token Tracking | ✅ | ❌ | ❌ | ⚠️ Custom |
-| STOP ALL | ✅ | ❌ | ❌ | ❌ |
-| TODO Management | ✅ | ❌ | ❌ | ❌ |
-| Context Recovery | ✅ | ❌ | ❌ | ⚠️ Limited |
-| File Manager | ✅ | ⚠️ Basic | ❌ | ❌ |
-| Shell History | ✅ | ❌ | ❌ | ❌ |
-| Transport | HTTP REST | JSON-RPC | JSON-RPC/gRPC | OTLP |
-
----
-
-## 2. Architecture
-
-### 2.1 Components
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        AI AGENT                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  1. CHECK STATUS (stop_flag?)                            │   │
-│  │  2. LOG ACTION (POST /api/start)                         │   │
-│  │  3. EXECUTE ACTION                                        │   │
-│  │  4. LOG COMPLETE (POST /api/complete)                    │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ HTTP REST
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    ACP SERVER                                   │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
-│  │  Activity   │  │   Token     │  │   File      │             │
-│  │  Monitor    │  │   Tracker   │  │   Manager   │             │
-│  └─────────────┘  └─────────────┘  └─────────────┘             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
-│  │    TODO     │  │   Shell     │  │   Context   │             │
-│  │   Tracker   │  │   History   │  │   Recovery  │             │
-│  └─────────────┘  └─────────────┘  └─────────────┘             │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    STORAGE                                      │
-│  ┌──────────────────────┐  ┌──────────────────────┐            │
-│  │  agent_activity.json │  │  acp_session_summary │            │
-│  │  (Session State)     │  │  .md (Recovery)      │            │
-│  └──────────────────────┘  └──────────────────────┘            │
-└─────────────────────────────────────────────────────────────────┘
+# Open http://localhost:8766 (default: admin/secret)
 ```
 
-### 2.2 Request Flow
+## What ACP Does
+
+ACP acts as a "dashboard" for AI agents, allowing them to:
+
+- **Report Activities** - Log what they're doing (reading files, running commands, etc.)
+- **Track Token Usage** - Monitor context window consumption
+- **Shell History** - Record terminal commands executed
+- **Task Management** - Sync TODO lists and track progress
+- **Stop/Resume** - Allow humans to pause agent activity
+
+## Versions
+
+### Minimal (`acp-minimal.py`) - Reference Implementation
+- **~400 lines** of pure Python (no dependencies)
+- Single file, drop-in solution
+- Basic web UI included
+- Core API endpoints only
+- Perfect for learning the protocol or simple integrations
+
+### Full Version (`VTSTech-GLMACP.py`) - Production Ready
+The full implementation includes everything in minimal plus:
+
+| Feature | Description |
+|---------|-------------|
+| **File Browser** | View and browse files the agent has accessed |
+| **Syntax Highlighting** | Code highlighting for 50+ languages |
+| **Line Numbers** | Optional line numbers in file viewer |
+| **Activity Filters** | Filter by action type, status, date range |
+| **Search** | Full-text search across activities |
+| **Changelog UI** | Version history and release notes |
+| **CSRF Protection** | Security hardening |
+| **Rate Limiting** | Prevent API abuse |
+| **Better Token Estimation** | Improved token counting heuristics |
+| **Configurable Context Window** | Environment variable `GLMACP_CONTEXT_WINDOW` |
+| **File Token Deduplication** | Don't double-count re-read files |
+| **Seamless Restarts** | SO_REUSEPORT for zero-downtime reload |
+
+## API Reference
+
+### Core Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/status` | Get current state (running, history, tokens, stop_flag) |
+| POST | `/api/action` | Log an activity (start/complete workflow) |
+| POST | `/api/stop` | Set stop flag, cancel running activities |
+| POST | `/api/resume` | Clear stop flag |
+| GET | `/api/history` | Get activity history |
+| POST | `/api/reset` | Clear all session data |
+
+### Extended Endpoints (Full Version)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/files` | List files accessed |
+| GET | `/api/files/view` | View file content with token count |
+| GET | `/api/changelog` | Get version history |
+
+### Action Types
+
+| Action | Target Example | Details |
+|--------|----------------|---------|
+| `READ` | `/path/to/file.py` | File being read |
+| `WRITE` | `/path/to/output.md` | File being written |
+| `EXECUTE` | `npm install` | Shell command |
+| `SEARCH` | `pattern` | Search operation |
+| `LLM` | `claude-3-opus` | LLM interaction |
+| `TODO` | `task-id-123` | TODO update |
+| `WEB` | `https://example.com` | Web request |
+
+## Integration Pattern
+
+Agents should follow this workflow:
 
 ```
-Agent Action Flow:
-─────────────────
-
-     ┌──────────────┐
-     │ CHECK STATUS │─────► GET /api/status
-     └──────┬───────┘       (stop_flag == true ? STOP)
-            │
-            ▼
-     ┌──────────────┐
-     │ LOG ACTION   │─────► POST /api/start
-     └──────┬───────┘       Returns: activity_id
-            │
-            ▼
-     ┌──────────────┐
-     │ DO ACTION    │─────► Execute Read/Write/Edit/Bash/etc.
-     └──────┬───────┘
-            │
-            ▼
-     ┌──────────────┐
-     │ LOG COMPLETE │─────► POST /api/complete
-     └──────────────┘       {activity_id, result}
+1. CHECK STATUS → GET /api/status (check stop_flag)
+2. LOG ACTION   → POST /api/action (with action, target, details)
+3. EXECUTE      → Do the actual work
+4. COMPLETE     → POST /api/action (with complete_id, result)
 ```
 
----
+### Example: Reading a File
 
-## 3. Data Model
+```python
+import requests
 
-### 3.1 Session State
+ACP_URL = "http://localhost:8766"
+AUTH = ("admin", "secret")
 
-The complete session state is stored in a single JSON file:
+# 1. Check if we should stop
+status = requests.get(f"{ACP_URL}/api/status", auth=AUTH).json()
+if status["stop_flag"]:
+    print(f"Stop requested: {status['stop_reason']}")
+    exit(1)
 
-```json
-{
-  "running": ["<Activity>", "..."],
-  "history": ["<Activity>", "..."],
-  "stop_flag": false,
-  "stop_reason": null,
-  "session_tokens": 45000,
-  "startup_applied": true,
-  "todos": ["<TODO>", "..."],
-  "shell_history": ["<ShellEntry>", "..."],
-  "ai_notes": ["<Note>", "..."],
-  "session_start": 1700000000.0,
-  "last_activity": 1700001000.0
-}
+# 2. Log action start
+resp = requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
+    "action": "READ",
+    "target": "/home/user/project/main.py",
+    "details": "Reading source file"
+})
+activity_id = resp.json()["activity_id"]
+
+# 3. Execute
+content = open("/home/user/project/main.py").read()
+
+# 4. Complete
+requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
+    "complete_id": activity_id,
+    "result": f"Read {len(content)} bytes"
+})
 ```
 
-### 3.2 Activity Object
-
-```typescript
-interface Activity {
-  id: string;              // "HHMMSS-abc123" format
-  action: ActionType;      // READ | WRITE | EDIT | BASH | TODO | SKILL | API | SEARCH
-  target: string;          // File path, command, or resource identifier
-  details: string;         // Human-readable description
-  status: ActivityStatus;  // running | completed | error | cancelled
-  started: string;         // ISO 8601 timestamp
-  completed?: string;      // ISO 8601 timestamp
-  tokens_in: number;       // Estimated input tokens
-  tokens_out?: number;     // Estimated output tokens
-  result?: string;         // Result summary (max 500 chars)
-  error?: string;          // Error message (max 200 chars)
-  duration_ms?: number;    // Duration in milliseconds
-}
-```
-
-### 3.3 Action Types
-
-| Action | Description | Example Target |
-|--------|-------------|----------------|
-| `READ` | Reading files, viewing content, API GETs | `/path/to/file.py` |
-| `WRITE` | Creating new files | `/path/to/newfile.py` |
-| `EDIT` | Modifying existing files | `/path/to/file.py` |
-| `BASH` | Terminal commands, scripts, CLI tools | `ls -la` |
-| `TODO` | TODO state changes | `task-id` or task description |
-| `SKILL` | Invoking skills (VLM, TTS, etc.) | `image-generation` |
-| `API` | External API calls | `POST https://api.example.com` |
-| `SEARCH` | Web search, grep, find operations | `search query` |
-
-### 3.4 TODO Object
-
-```typescript
-interface TODO {
-  id: string;              // "HHMMSS-abc123" format
-  content: string;         // Task description
-  status: TODOStatus;      // pending | in_progress | completed
-  priority: Priority;      // high | medium | low
-  created: string;         // ISO 8601 timestamp
-}
-```
-
-### 3.5 Shell Entry Object
-
-```typescript
-interface ShellEntry {
-  id: string;              // "HHMMSS-abc123" format
-  command: string;         // Command executed (max 500 chars)
-  timestamp: string;       // ISO 8601 timestamp
-  status: ShellStatus;     // running | completed | error
-  output_preview: string;  // Output snippet (max 200 chars)
-}
-```
-
-### 3.6 AI Note Object
-
-```typescript
-interface Note {
-  id: string;              // "HHMMSS-abc123" format
-  timestamp: string;       // ISO 8601 timestamp
-  category: NoteCategory;  // decision | insight | context | warning | todo
-  content: string;         // Note content (max 500 chars)
-  importance: Importance;  // normal | high
-}
-```
-
-### 3.7 Storage Files
-
-| File | Purpose | Persistence |
-|------|---------|-------------|
-| `agent_activity.json` | Session state storage | Per-session |
-| `acp_session_summary.md` | Context recovery export | Survives restarts |
-| `acp_restart.log` | Server restart debugging | Overwritten each restart |
-| `csrf_secret.txt` | CSRF token signing secret | Survives restarts |
-
----
-
-## 4. API Specification
-
-### 4.1 Authentication
-
-All API requests require HTTP Basic Authentication:
-
-```
-Authorization: Basic base64(username:password)
-```
-
-### 4.2 CSRF Protection
-
-All POST requests require a CSRF token header:
-
-```
-X-CSRF-Token: <timestamp>:<signature>
-```
-
-Obtain token via `GET /api/csrf-token`.
-
-### 4.3 Activity Monitor Endpoints
-
-#### GET /api/status
-
-Check stop flag and token usage.
-
-**Response:**
-```json
-{
-  "success": true,
-  "stop_flag": false,
-  "stop_reason": null,
-  "running_count": 1,
-  "running": ["<Activity>"],
-  "session_tokens": 45000,
-  "startup_tokens": 3000,
-  "activity_tokens": 42000,
-  "context_window": 200000,
-  "tokens_remaining": 155000,
-  "tokens_percent": 22.5,
-  "overflow_warning": null,
-  "session": { "<SessionInfo>" }
-}
-```
-
-#### GET /api/running
-
-List currently running activities.
-
-#### GET /api/history
-
-List completed activity history (most recent first).
-
-#### GET /api/all
-
-Convenience endpoint that returns status, running, history, and tokens in one call.
-
-**Response:**
-```json
-{
-  "success": true,
-  "stop_flag": false,
-  "stop_reason": null,
-  "running": ["<Activity>"],
-  "history": ["<Activity>", "..."],
-  "session_tokens": 45000,
-  "context_window": 200000,
-  "tokens_remaining": 155000,
-  "tokens_percent": 22.5
-}
-```
-
-#### POST /api/start
-
-Start a new activity.
-
-**Request:**
-```json
-{
-  "action": "READ",
-  "target": "/path/to/file.py",
-  "details": "Reading configuration file"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "activity_id": "143052-a1b2c3",
-  "session_tokens": 45100,
-  "context_window": 200000,
-  "tokens_remaining": 154900
-}
-```
-
-**Error (Stop Requested):**
-```json
-{
-  "success": false,
-  "error": "Stop requested"
-}
-```
-
-#### POST /api/complete
-
-Complete an activity.
-
-**Request:**
-```json
-{
-  "activity_id": "143052-a1b2c3",
-  "result": "File read successfully, 150 lines"
-}
-```
-
-**Error Response:**
-```json
-{
-  "activity_id": "143052-a1b2c3",
-  "error": "File not found"
-}
-```
-
-#### POST /api/action
-
-Combined endpoint: complete previous + start new in one call.
-
-**Request:**
-```json
-{
-  "complete_id": "143052-a1b2c3",
-  "result": "Previous action completed",
-  "action": "READ",
-  "target": "/path/to/next/file.py",
-  "details": "Reading next file"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "activity_id": "143100-d4e5f6",
-  "completed": { "<Previous Activity>" },
-  "stop_flag": false,
-  "session_tokens": 45200,
-  "context_window": 200000,
-  "tokens_remaining": 154800,
-  "tokens_percent": 22.6,
-  "overflow_warning": null,
-  "session": { "<SessionInfo>" },
-  "running_count": 1
-}
-```
-
-#### POST /api/stop
-
-Trigger STOP ALL - cancels all running activities.
-
-**Request:**
-```json
-{
-  "reason": "User clicked STOP ALL"
-}
-```
-
-#### POST /api/resume
-
-Clear stop flag and resume operations.
-
-#### POST /api/clear_history
-
-Clear activity history.
-
-#### POST /api/reset_session
-
-Reset session to fresh state (tokens reset to startup value).
-
-### 4.4 TODO Endpoints
-
-#### GET /api/todos
-
-Get current TODO list.
-
-#### POST /api/todos/update
-
-Replace entire TODO list.
-
-**Request:**
-```json
-{
-  "todos": [
-    {"content": "Task 1", "status": "pending", "priority": "high"},
-    {"content": "Task 2", "status": "in_progress", "priority": "medium"}
-  ]
-}
-```
-
-#### POST /api/todos/add
-
-Add single TODO item.
-
-**Request:**
-```json
-{
-  "todo": {
-    "content": "New task",
-    "status": "pending",
-    "priority": "high"
-  }
-}
-```
-
-#### POST /api/todos/clear
-
-Clear completed TODOs.
-
-### 4.5 Shell History Endpoints
-
-#### GET /api/shell
-
-Get shell command history.
-
-#### POST /api/shell/add
-
-Add shell command to history.
-
-**Request:**
-```json
-{
-  "command": "ls -la",
-  "status": "completed",
-  "output_preview": "total 64\ndrwxr-xr-x..."
-}
-```
-
-#### POST /api/shell/clear
-
-Clear shell history.
-
-### 4.6 Context Recovery Endpoints
-
-#### GET /api/summary
-
-Get condensed session summary for context recovery.
-
-**Response:**
-```json
-{
-  "success": true,
-  "summary": {
-    "session_overview": {
-      "duration": "15m 30s",
-      "duration_seconds": 930,
-      "total_activities": 42,
-      "activity_breakdown": {"READ": 25, "EDIT": 10, "BASH": 7},
-      "currently_running": 0,
-      "stop_flag": false,
-      "stop_reason": null
-    },
-    "token_usage": {
-      "session_tokens": 45000,
-      "tokens_percent": 22.5,
-      "context_window": 200000,
-      "tokens_remaining": 155000
-    },
-    "file_interactions": {
-      "files_read": ["file1.py", "file2.py"],
-      "files_written": ["newfile.py"],
-      "files_edited": ["config.py"]
-    },
-    "ai_notes": ["<Note>", "..."],
-    "todos": ["<TODO>", "..."],
-    "recent_activities": ["<Activity>", "..."]
-  }
-}
-```
-
-#### POST /api/summary/export
-
-Export summary to persistent markdown file for sharing with new sessions.
-
-#### GET /api/notes
-
-Get all AI notes.
-
-#### POST /api/notes/add
-
-Add note for context recovery.
-
-**Request:**
-```json
-{
-  "category": "decision",
-  "content": "Decided to use PostgreSQL instead of SQLite for scalability",
-  "importance": "high"
-}
-```
-
-**Categories:**
-- `decision`: Important decisions made
-- `insight`: Key discoveries or insights
-- `context`: Context that should be preserved
-- `warning`: Issues or problems encountered
-- `todo`: Things to remember to do
-
-#### POST /api/notes/clear
-
-Clear all AI notes.
-
-### 4.7 File Manager Endpoints
-
-#### GET /api/files/list
-
-List directory contents.
-
-**Headers:**
-- `X-Path`: Relative path from base directory
-- `X-Sort-By`: `name` | `date` | `size`
-- `X-Sort-Dir`: `asc` | `desc`
-
-#### GET /api/files/view
-
-View file content (text files only, size limited).
-
-**Headers:**
-- `X-Path`: Relative path to file
-
-**Response:**
-```json
-{
-  "content": "file contents...",
-  "path": "path/to/file.py",
-  "lines": 150,
-  "tokens": 450,
-  "session_tokens": 45450
-}
-```
-
-#### GET /api/files/download
-
-Download file (binary safe).
-
-**Query Parameters:**
-- `path`: Relative path to file
-
-#### GET /api/files/image
-
-Get image file.
-
-#### GET /api/files/stats
-
-Get file statistics (total files, directories, size).
-
-#### POST /api/files/upload
-
-Upload file.
-
-**Headers:**
-- `X-Path`: Destination directory
-- `X-Filename`: File name
-- `Content-Type`: `application/octet-stream`
-
-**Body:** Raw binary file content
-
-#### POST /api/files/save
-
-Save edited file.
-
-**Request:**
-```json
-{
-  "path": "path/to/file.py",
-  "content": "updated content..."
-}
-```
-
-#### POST /api/files/delete
-
-Delete file or directory.
-
-**Request:**
-```json
-{
-  "path": "path/to/delete"
-}
-```
-
-#### POST /api/files/mkdir
-
-Create directory.
-
-**Request:**
-```json
-{
-  "path": "parent/path",
-  "name": "new_directory"
-}
-```
-
-#### POST /api/files/extract
-
-Extract archive.
-
-**Request:**
-```json
-{
-  "path": "path/to/archive.zip"
-}
-```
-
-**Supported formats:** `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.gz`, `.bz2`
-
-#### POST /api/files/compress
-
-Create zip archive.
-
-**Request:**
-```json
-{
-  "path": "directory/path",
-  "name": "archive.zip",
-  "items": ["file1.py", "file2.py", "subdir/"]
-}
-```
-
-### 4.8 System Endpoints
-
-#### GET /api/system
-
-Get CPU, RAM, Disk statistics.
-
-**Response:**
-```json
-{
-  "success": true,
-  "system": {
-    "cpu": {"percent": 45.2, "cores": 8},
-    "ram": {"percent": 62.5, "used_gb": 10.0, "total_gb": 16.0},
-    "disk": {"percent": 35.0, "used_gb": 1.2, "total_gb": 50.0}
-  }
-}
-```
-
-#### GET /api/session
-
-Get session info (timeout, activity timestamps).
-
-#### POST /api/session/refresh
-
-Reset session timeout (extend session).
-
-#### POST /api/restart
-
-Restart the ACP server. Useful for applying configuration changes.
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Restarting..."
-}
-```
-
-#### GET /api/csrf-token
-
-Get CSRF token for POST requests.
-
----
-
-## 5. Agent Workflow
-
-### 5.0 Mandatory Integration Requirements
-
-All agents using ACP **MUST**:
-
-1. **Log every action** via `/api/action` BEFORE executing
-2. **Log every shell command** via `/api/shell/add` AFTER executing
-3. **Sync TODO state** via `/api/todos/update` when TODOs change
-4. **Check stop flag** before starting any new activity
-
-Failure to follow these requirements results in incomplete activity tracking,
-inaccurate token estimation, and lost session history.
-
-### 5.1 Mandatory Workflow
-
-AI agents using ACP **MUST** follow this workflow:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    ACP AGENT WORKFLOW                           │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. CHECK STATUS                                                │
-│     GET /api/status                                             │
-│     If stop_flag == true, STOP IMMEDIATELY and inform user     │
-│                                                                 │
-│  2. LOG ACTION FIRST (before doing it!)                         │
-│     POST /api/start {"action": "READ", "target": "/file.py"}   │
-│     Returns: {"activity_id": "HHMMSS-abc123"}                  │
-│                                                                 │
-│  3. NOW DO THE ACTION                                           │
-│     Perform Read, Write, Edit, Bash, Skill invocation, etc.    │
-│                                                                 │
-│  4. LOG COMPLETION                                              │
-│     POST /api/complete {"activity_id": "...", "result": "..."} │
-│     Or: {"activity_id": "...", "error": "error message"}       │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 5.2 Optimized Workflow (Single Request)
-
-For efficiency, use the combined `/api/action` endpoint:
-
-```
-POST /api/action {
-  "complete_id": "previous_activity_id",
-  "result": "Previous action completed successfully",
-  "action": "READ",
-  "target": "/next/file.py",
-  "details": "Reading next file"
-}
-```
-
-This single request:
-1. Checks stop flag
-2. Completes previous activity
-3. Starts new activity
-4. Returns updated token counts
-
-### 5.3 Shell Command Logging (MANDATORY)
-
-**All shell/terminal commands MUST be logged to ACP.**
-
-When running BASH commands, log to both Activity Monitor AND Shell History:
-
-```
-# Log to Activity Monitor
-POST /api/start {"action": "BASH", "target": "npm install"}
-
-# Also log to Terminal tab for visibility
-POST /api/shell/add {
-  "command": "npm install",
-  "status": "running",
-  "output_preview": ""
-}
-
-# Execute command...
-
-# Update shell history
-POST /api/shell/add {
-  "command": "npm install",
-  "status": "completed",
-  "output_preview": "added 150 packages..."
-}
-
-# Complete activity
-POST /api/complete {"activity_id": "...", "result": "Installed dependencies"}
-```
-
-### 5.4 TODO Synchronization (MANDATORY)
-
-**TODO state must be synchronized with ACP.**
-
-**At Session Start:**
-```
-GET /api/todos → Restore TODO state from previous session
-```
-
-**When TODOs Change:**
-```
-POST /api/todos/update {"todos": [...]}  # Full sync
-```
-
-**When Completing Task:**
-```
-POST /api/action {"action": "TODO", "target": "task_id", "details": "Marked completed"}
-```
-
----
-
-## 6. Context Recovery
-
-### 6.1 Purpose
-
-Context recovery allows AI agents to restore session state after:
-- Context window compression
-- Session restart
-- Container restart
-
-### 6.2 Recovery Workflow
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                 CONTEXT RECOVERY WORKFLOW                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  AT SESSION START:                                              │
-│  1. Check for acp_session_summary.md in upload directory       │
-│  2. If found, read it for previous session context             │
-│  3. Call GET /api/summary for current session state            │
-│                                                                 │
-│  DURING SESSION:                                                │
-│  - Save important notes: POST /api/notes/add                   │
-│  - Mark high importance for critical items                      │
-│                                                                 │
-│  BEFORE CONTEXT COMPRESSION:                                    │
-│  - POST /api/summary/export to create persistent summary       │
-│  - Share acp_session_summary.md with next session              │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 6.3 Note Categories
-
-| Category | When to Use | Example |
-|----------|-------------|---------|
-| `decision` | After making important decisions | "Chose PostgreSQL over SQLite for scalability" |
-| `insight` | After discovering something important | "Bug in token estimation - use 3.5 chars/token" |
-| `context` | Context that should be preserved | "User prefers functional programming style" |
-| `warning` | After encountering issues | "Rate limiting on external API - use caching" |
-| `todo` | Things to remember to do | "Need to refactor auth module next session" |
-
----
-
-## 7. Security
-
-### 7.1 Authentication
-
-- HTTP Basic Authentication required for all endpoints
-- Credentials configured via environment variables
-- Rate limiting on failed authentication attempts
-
-### 7.2 CSRF Protection
-
-- All POST requests require valid CSRF token
-- Tokens expire after configurable timeout (default: 1 hour)
-- Tokens are signed with server-side secret
-
-### 7.3 Session Management
-
-- Sessions have configurable timeout (default: 24 hours)
-- Activity timestamp updated on each request
-- Sessions can be refreshed explicitly
-
-### 7.4 File Access
-
-- Path traversal prevention (all paths must be within base directory)
-- File size limits for viewing (configurable)
-- Upload size limits (configurable)
-
-### 7.5 Rate Limiting
-
-- Failed authentication attempts tracked per IP
-- Configurable window and max attempts
-- Blocking cleared on successful authentication
-
----
-
-## 8. Configuration
-
-### 8.1 Environment Variables
+### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GLMACP_PORT` | `8766` | Server port |
-| `GLMACP_USER` | `vtstech` | Authentication username |
-| `GLMACP_PASS` | `nopenope` | Authentication password |
-| `GLMACP_CSRF_SECRET` | *(random)* | CSRF signing secret |
-| `GLMACP_SESSION_TIMEOUT` | `86400` | Session timeout in seconds |
-| `GLMACP_STARTUP_TOKENS` | `3000` | Initial token overhead |
-| `GLMACP_CONTEXT_WINDOW` | `200000` | LLM context window size |
-| `GLMACP_MAX_UPLOAD_SIZE` | `104857600` | Max upload size (100MB) |
-| `GLMACP_MAX_FILE_VIEW_SIZE` | `10485760` | Max file view size (10MB) |
+| `ACP_PORT` | `8766` | Server port |
+| `ACP_USER` | `admin` | HTTP Basic Auth username |
+| `ACP_PASS` | `secret` | HTTP Basic Auth password |
+| `ACP_DATA_FILE` | `acp_data.json` | Session storage file |
+| `ACP_CONTEXT_WINDOW` | `200000` | Token limit for progress bar |
+| `GLMACP_CONTEXT_WINDOW` | `200000` | (Full version) Alias for above |
 
-### 8.2 Constants
+## Documentation
 
-| Constant | Value | Description |
-|----------|-------|-------------|
-| `CONTEXT_WINDOW` | `200000` | LLM context window size |
-| `MAX_HISTORY` | `100` | Maximum activity history entries |
-| `MAX_NOTES` | `50` | Maximum AI notes |
-| `MAX_SHELL_HISTORY` | `50` | Maximum shell history entries |
+- **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.0)
+- **[ACP-Agent-Guide.md](./ACP-Agent-Guide.md)** - Quick integration guide for agents
 
-### 8.3 Token Estimation
+## Screenshots
 
-ACP estimates tokens using a character-based heuristic:
+### Minimal UI
+![ACP Minimal UI](https://via.placeholder.com/800x400/0d1117/e6edf3?text=ACP+Minimal+Dashboard)
 
-```python
-def estimate_tokens(text: str) -> int:
-    """Estimate tokens using ~3.5 characters per token."""
-    return int(len(text) / 3.5)
+Dark theme dashboard showing:
+- Token usage with progress bar
+- Running/completed activities
+- Terminal command history
+- TODO list sync
+
+### Full Version
+The full version adds:
+- File browser with syntax highlighting
+- Activity filtering and search
+- Changelog viewer
+- Enhanced statistics
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                      AI Agent                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
+│  │ File Ops    │  │ Shell Exec  │  │ LLM Calls   │     │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘     │
+│         │                │                │             │
+│         └────────────────┼────────────────┘             │
+│                          │                              │
+│                          ▼                              │
+│  ┌───────────────────────────────────────────────┐     │
+│  │              ACP Client Library               │     │
+│  │  log_action() | check_stop() | complete()     │     │
+│  └───────────────────────┬───────────────────────┘     │
+└──────────────────────────┼──────────────────────────────┘
+                           │ HTTP
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                    ACP Server                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
+│  │ REST API    │  │ Web UI      │  │ Storage     │     │
+│  └─────────────┘  └─────────────┘  └─────────────┘     │
+└─────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+                    Human Operator
+                    (Browser/Dashboard)
 ```
 
-This is tuned for mixed code/prose content and provides a conservative estimate.
+## Use Cases
 
-### Token Sources
-
-| Source | How Tracked | Notes |
-|--------|-------------|-------|
-| `/api/action` | Input tokens from action + target + details | Logged BEFORE executing |
-| `/api/complete` | Output tokens from result | Logged AFTER executing |
-| `/api/files/view` | File content tokens | Deduplicated per session |
-
----
-
-## 9. Implementation Guide
-
-### 9.1 Server Implementation
-
-A minimal ACP server requires:
-
-1. **HTTP Server**: Handle REST API requests
-2. **JSON Storage**: Persist session state
-3. **File Access**: Browse workspace files
-4. **Token Estimation**: Track context usage
-5. **CSRF Protection**: Secure POST requests
-
-### 9.2 Client Implementation
-
-AI agents should implement:
-
-1. **Status Check**: Call before each action
-2. **Action Logging**: Log before executing
-3. **Completion Logging**: Log after executing
-4. **Error Handling**: Handle stop requests gracefully
-5. **Context Recovery**: Save/load notes for session continuity
-
-### 9.3 Reference Implementation
-
-See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
-
----
-
-## Appendix A: Response Codes
-
-| Code | Meaning |
-|------|---------|
-| `200` | Success |
-| `400` | Bad Request (missing/invalid parameters) |
-| `401` | Unauthorized (authentication required/failed) |
-| `403` | Forbidden (invalid CSRF, stop requested) |
-| `404` | Not Found (activity, file, endpoint) |
-| `413` | Payload Too Large (file size limit exceeded) |
-| `429` | Too Many Requests (rate limited) |
-| `500` | Internal Server Error |
-
----
-
-## Appendix B: Changelog
-
-### v1.0.0 (Current)
-- Initial specification release
-- Activity monitoring with LOG → DO → COMPLETE workflow
-- Token estimation and context window tracking
-- STOP ALL emergency control
-- TODO management
-- Shell history
-- Context recovery with AI notes
-- File manager with upload/download
-- CSRF protection
-- Session management with timeout
-- Rate limiting
-
----
+1. **Development Agents** - Monitor what files your coding agent is touching
+2. **Research Agents** - Track web searches and LLM interactions
+3. **Task Automation** - See progress of long-running automation tasks
+4. **Safety/Control** - Intervene when agents go off-track
 
 ## License
 
-MIT License - Free for personal and commercial use.
+MIT
 
----
+## Author
 
-*This specification is maintained by VTSTech and the ACP community.*
+VTSTech
