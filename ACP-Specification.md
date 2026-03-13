@@ -190,13 +190,26 @@ Arbitrary key-value pairs for attaching custom context:
 ```json
 {
   "metadata": {
-    "file_hash": "abc123",
+    "agent_name": "Super Z",
     "source": "user_request",
+    "tool_name": "Read",
+    "file_hash": "abc123",
     "related_file": "/path/to/related.py",
     "retry_count": 2
   }
 }
 ```
+
+#### Standard Metadata Fields
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| `agent_name` | Name of the agent/subagent performing the action | `"Super Z"`, `"full-stack-developer"` |
+| `source` | Origin of the action | `"user_request"`, `"auto"`, `"subagent"` |
+| `tool_name` | Native tool used | `"Read"`, `"Write"`, `"Edit"`, `"Bash"` |
+| `skill` | Skill invoked (for SKILL actions) | `"image-generation"`, `"VLM"` |
+
+The `agent_name` field is particularly important for multi-agent scenarios where multiple agents or subagents may work on the same session.
 
 ### 3.3 Action Types
 
@@ -847,6 +860,37 @@ Restart the ACP server. Useful for applying configuration changes.
 
 Get CSRF token for POST requests.
 
+#### GET /api/whoami
+
+Self-awareness endpoint for AI agents. Returns identity context to help agents understand their role and properly attribute activities.
+
+**Response:**
+```json
+{
+  "success": true,
+  "identity": {
+    "hint": "You are an AI agent. Identify yourself by name (e.g., 'Super Z', 'Claude', 'GPT-4').",
+    "suggestion": "Use the 'agent_name' field in activity metadata to attribute your actions.",
+    "example": {"metadata": {"agent_name": "Super Z", "source": "user_request"}},
+    "purpose": "Attribution helps track which agent/subagent performed each action."
+  },
+  "session": {"<SessionInfo>"}
+}
+```
+
+**When to call:**
+- At session start to establish identity
+- After context compression to re-establish context
+- Before invoking subagents (to contrast agent names)
+
+**Agent workflow integration:**
+```
+1. Call GET /api/whoami at session start
+2. Extract identity hint and determine agent_name
+3. Include agent_name in all activity metadata:
+   POST /api/action {"metadata": {"agent_name": "Super Z", ...}}
+```
+
 ---
 
 ## 5. Agent Workflow
@@ -871,6 +915,12 @@ AI agents using ACP **MUST** follow this workflow:
 ┌─────────────────────────────────────────────────────────────────┐
 │                    ACP AGENT WORKFLOW                           │
 ├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  0. SESSION START (optional but recommended)                    │
+│     GET /api/whoami  →  Establish identity context             │
+│     GET /api/summary →  Recover previous session state         │
+│     GET /api/todos   →  Restore TODO list                      │
+│     Set agent_name in metadata for all activities              │
 │                                                                 │
 │  1. CHECK STATUS                                                │
 │     GET /api/status                                             │
@@ -1173,13 +1223,16 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 - **NEW**: Activity `priority` field (`high` | `medium` | `low`)
 - **NEW**: Activity `metadata` field for arbitrary key-value pairs
 - **NEW**: `GET /api/activity/{id}` endpoint for single activity lookup
+- **NEW**: `GET /api/whoami` endpoint for agent self-awareness and identity attribution
 - **NEW**: Activity Hints - contextual information returned in `/api/action` response
+- **NEW**: Standard metadata fields: `agent_name`, `source`, `tool_name`, `skill`
+- **DOC**: Added §3.2.1 Priority Levels section
+- **DOC**: Added §3.2.2 Metadata section with Standard Metadata Fields table
 - **DOC**: Added §3.3.1 CHAT Action Type section
+- **DOC**: Added §5.1 Session Start workflow step (whoami, summary, todos)
 - **FIX**: Accurate token tracking for agents using native Read/Write/Edit tools
 - **FIX**: Token tracking now captures cognitive work without tool execution
-- **DOC**: Added §3.2.1 Priority Levels section
-- **DOC**: Added §3.2.2 Metadata section
-- **DOC**: Added §8.4 Native Tool Token Tracking section
+- **FIX**: File upload CSRF token missing (drag-drop and button upload)
 - **DOC**: Added parameter tables to API endpoint documentation
 
 ### v1.0.0

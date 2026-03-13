@@ -77,8 +77,9 @@ POST /api/action {
   "action": "READ",
   "target": "/file.py",
   "metadata": {
+    "agent_name": "Super Z",      # Who performed this action
+    "source": "user_request",     # Origin of action
     "file_hash": "abc123",
-    "source": "user_request",
     "related_to": "issue-42"
   }
 }
@@ -90,6 +91,15 @@ POST /api/complete {
   "metadata": {"bytes_written": 5000}
 }
 ```
+
+**Standard metadata fields:**
+
+| Field | Description | Example |
+|-------|-------------|--------|
+| `agent_name` | Name of agent/subagent | `"Super Z"`, `"full-stack-developer"` |
+| `source` | Origin of action | `"user_request"`, `"auto"`, `"subagent"` |
+| `tool_name` | Native tool used | `"Read"`, `"Write"`, `"Bash"` |
+| `skill` | Skill invoked (SKILL actions) | `"image-generation"` |
 
 ### Example: File Read
 
@@ -176,10 +186,31 @@ POST /api/complete {
 ### Session Start
 
 ```bash
-# Restore TODO state from ACP
+# 1. Establish identity (optional but recommended)
+GET /api/whoami
+→ {"identity": {"hint": "You are an AI agent. Identify yourself..."}}
+
+# 2. Restore TODO state from ACP
 GET /api/todos
 → {"todos": [{"id": "1", "content": "Task 1", "status": "pending"}, ...]}
 ```
+
+### Agent Identity (v1.0.1)
+
+Use `agent_name` in metadata to attribute actions to yourself:
+
+```bash
+POST /api/action {
+  "action": "READ",
+  "target": "/file.py",
+  "metadata": {
+    "agent_name": "Super Z",     # Your identity
+    "source": "user_request"     # Origin of action
+  }
+}
+```
+
+**Why it matters:** In multi-agent scenarios or when invoking subagents, attribution helps track who did what. Call `/api/whoami` at session start to establish identity context.
 
 ### TODO State Changes
 
@@ -347,6 +378,9 @@ GET /api/csrf-token
 
 ```bash
 # === SESSION START ===
+→ GET /api/whoami
+← {identity: {hint: "You are an AI agent. Identify yourself..."}}
+
 → GET /api/status
 ← {stop_flag: false, tokens_percent: 15}
 
@@ -354,7 +388,7 @@ GET /api/csrf-token
 ← {todos: [{"id": "1", "content": "Review code", "status": "pending"}]}
 
 # === FILE READ ===
-→ POST /api/action {"action": "READ", "target": "config.py", "details": "Load config"}
+→ POST /api/action {"action": "READ", "target": "config.py", "details": "Load config", "metadata": {"agent_name": "Super Z"}}
 ← {activity_id: "143052-a1b2c3", stop_flag: false}
 
 → [Read config.py using native tool]
@@ -412,6 +446,7 @@ GET /api/csrf-token
 │  □ Check status before starting (GET /api/status)           │
 │  □ Log action BEFORE executing (POST /api/action)           │
 │  □ Include content_size for native tools (v1.0.1)           │
+│  □ Include agent_name in metadata for attribution           │
 │  □ Log shell commands AFTER executing (POST /api/shell/add) │
 │  □ Complete activity when done (POST /api/complete)         │
 │  □ Sync TODOs on change (POST /api/todos/update)            │
@@ -428,9 +463,12 @@ GET /api/csrf-token
 ├─────────────────────────────────────────────────────────────┤
 │  • priority: "high" | "medium" | "low"                       │
 │  • metadata: {arbitrary: "key-value pairs"}                  │
+│  • agent_name: Identify yourself in activity metadata       │
+│  • GET /api/whoami - Self-awareness/identity endpoint       │
 │  • GET /api/activity/{id} - Single activity lookup           │
 │  • content_size: Character count for token tracking          │
 │  • hints: Contextual hints in /api/action response           │
+│  • CHAT: New action type for conversational exchanges        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
