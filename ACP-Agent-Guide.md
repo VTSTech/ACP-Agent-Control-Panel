@@ -82,6 +82,42 @@ If `activity_id` is set in your context, you MUST complete it before starting ne
 
 ---
 
+## 🔌 SESSION END PROTOCOL
+
+**Trigger phrases from user:**
+- "End this session"
+- "We're done for now"
+- "Kill ACP"
+- "Shutdown"
+
+**When you hear these, the human may use the SHUTDOWN button in the ACP UI.**
+
+**What happens on shutdown:**
+```
+1. Server exports session summary (for next session recovery)
+2. All running activities are cancelled
+3. You receive a shutdown nudge with type: "shutdown"
+4. Server stops after 2 seconds
+```
+
+**Your response to shutdown:**
+```bash
+# If you see a nudge with type: "shutdown":
+# 1. Acknowledge it
+POST /api/nudge/ack {}
+→ {"success": true, "message": "Nudge acknowledged"}
+
+# 2. Inform user that session is ending
+"The ACP session has ended. The server has stopped."
+
+# 3. DO NOT attempt any more actions via ACP
+# The server is no longer running
+```
+
+**Important:** After shutdown, don't try to log more actions. The server is gone.
+
+---
+
 ## 🔄 EVERY-ACTION TRIGGER (MOST IMPORTANT SECTION)
 
 **This section is the core of ACP integration. Read it twice.**
@@ -670,6 +706,8 @@ GET /api/csrf-token
 │  • TODO/Shell metadata: agent_name, tool, skill attribution  │
 │  • Per-agent tokens: primary_agent, agent_tokens{}           │
 │  • Context isolation from subagents and other agents         │
+│  • POST /api/shutdown: Graceful session termination          │
+│  • Shutdown nudge: type: "shutdown" notifies agent           │
 │  • Check for nudge AND orphan_warning in EVERY response!     │
 └─────────────────────────────────────────────────────────────┘
 ```

@@ -656,6 +656,69 @@ Trigger STOP ALL - cancels all running activities.
 
 Clear stop flag and resume operations.
 
+#### POST /api/shutdown
+
+**v1.0.2** Gracefully end the session. This endpoint:
+1. Exports session summary for context recovery
+2. Cancels all running activities
+3. Sets a shutdown nudge to notify the agent
+4. Stops the server after a brief delay
+
+**Request:**
+```json
+{
+  "reason": "Session ended by user",
+  "export_summary": true
+}
+```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `reason` | string | No | Human-readable reason for shutdown (default: "Session ended by user") |
+| `export_summary` | boolean | No | Whether to export session summary (default: true) |
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Session ending - agent has been notified",
+  "summary_exported": true,
+  "summary_path": "/path/to/acp_session_summary.md",
+  "cancelled_activities": 2,
+  "note": "Server will stop in 2 seconds. Agent should acknowledge the shutdown nudge."
+}
+```
+
+**Shutdown Nudge:**
+
+The agent receives a special nudge with `type: "shutdown"`:
+
+```json
+{
+  "nudge": {
+    "message": "SESSION ENDING: The human has ended this session. Wrap up any final thoughts, then acknowledge this message. The server will stop shortly.",
+    "priority": "urgent",
+    "requires_ack": true,
+    "from": "system",
+    "type": "shutdown"
+  }
+}
+```
+
+**Agent workflow for shutdown:**
+```
+1. Receive shutdown nudge on next /api/action call
+2. If requires_ack=true, call POST /api/nudge/ack
+3. Inform user that session is ending
+4. No further actions should be taken
+```
+
+**Use cases:**
+- Human wants to end a development session
+- Clean shutdown before context compression
+- Graceful termination of long-running tasks
+
 #### POST /api/clear_history
 
 Clear activity history.
