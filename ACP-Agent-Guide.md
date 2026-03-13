@@ -1,6 +1,6 @@
 # ACP Agent Quick Reference
 
-**Version:** Draft 1.0.2 | **Spec:** See ACP-Specification.md for full details
+**Version:** Draft 1.0.2 | **Spec:** See [ACP-Specification.md](https://github.com/VTSTech/ACP-Agent-Control-Panel/blob/main/ACP-Specification.md) for full details
 
 ---
 
