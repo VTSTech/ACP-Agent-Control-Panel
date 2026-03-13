@@ -61,6 +61,9 @@ The full implementation includes everything in minimal plus:
 | **v1.0.2** Nudge API | Human guidance via synchronous message delivery |
 | **v1.0.2** Orphan Detection | Warning when starting tasks with running activities |
 | **v1.0.2** Nudge Priority | `normal` \| `high` \| `urgent` priority levels |
+| **v1.0.2** TODO/Shell Metadata | `agent_name`, `tool`, `skill` attribution |
+| **v1.0.2** Per-Agent Tokens | `primary_agent`, `agent_tokens{}` for context isolation |
+| **v1.0.2** Context Isolation | Session tokens reflect only primary agent context |
 
 ## API Reference
 

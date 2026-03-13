@@ -1,7 +1,6 @@
 # ACP Agent Quick Reference
 
-**Version:** Draft 1.0.2 | **Spec:** See ACP-Specification.md for full details  
-**Repository:** https://github.com/VTSTech/ACP-Agent-Control-Panel
+**Version:** Draft 1.0.2 | **Spec:** See ACP-Specification.md for full details
 
 ---
 
@@ -341,6 +340,26 @@ POST /api/complete {
 }
 ```
 
+### Per-Agent Token Tracking
+
+**Context Isolation:** The first agent to log an activity becomes the "primary agent" and owns the main context. Other agents (subagents, LocalClaw, etc.) are tracked separately.
+
+**Status Response:**
+```bash
+GET /api/status
+→ {
+    "session_tokens": 52529,        # Primary agent's context only
+    "primary_agent": "Super Z",     # Who owns the context
+    "agent_tokens": {
+      "Super Z": 84,                # Primary agent tokens
+      "LocalClaw": 93               # Other agent tokens (not in session_tokens)
+    },
+    "other_agents_tokens": 93       # Sum of non-primary tokens
+  }
+```
+
+**Why it matters:** Subagents and other agents won't pollute your context window estimation. You get accurate context tracking for the primary agent only.
+
 ---
 
 ## CONTEXT RECOVERY
@@ -469,18 +488,6 @@ GET /api/csrf-token
 
 ---
 
-## REPOSITORY
-
-| Resource | URL |
-|----------|-----|
-| **GitHub Repo** | https://github.com/VTSTech/ACP-Agent-Control-Panel |
-| **Issues** | https://github.com/VTSTech/ACP-Agent-Control-Panel/issues |
-| **Author** | https://github.com/VTSTech |
-
-For updates, bug reports, and contributions, visit the GitHub repository.
-
----
-
 ## QUICK REFERENCE CARD
 
 ```
@@ -528,6 +535,9 @@ For updates, bug reports, and contributions, visit the GitHub repository.
 │  • Priority levels: normal | high | urgent                   │
 │  • requires_ack: Block until agent acknowledges              │
 │  • orphan_warning: Detects running tasks before starting new │
+│  • TODO/Shell metadata: agent_name, tool, skill attribution  │
+│  • Per-agent tokens: primary_agent, agent_tokens{}           │
+│  • Context isolation from subagents and other agents         │
 │  • Check for nudge AND orphan_warning in EVERY response!     │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -568,6 +578,82 @@ POST /api/action {
 ```
 
 **Why it matters:** Starting multiple tasks without completing them causes "task leakage" - activities stuck in running state. Always check `orphan_warning` and `running_count` before starting new work.
+
+### TODO Metadata
+
+TODOs support metadata for agent attribution:
+
+```bash
+POST /api/todos/add {
+  "todo": {
+    "content": "Implement API endpoint",
+    "status": "pending",
+    "priority": "high"
+  },
+  "agent_name": "Super Z",      # Who created this TODO
+  "tool": "planning",           # Which tool created it
+  "skill": "fullstack-dev"      # Which skill (if applicable)
+}
+
+# Response includes metadata
+→ {
+    "success": true,
+    "todo": {
+      "id": "143052-abc123",
+      "content": "Implement API endpoint",
+      "status": "pending",
+      "priority": "high",
+      "created": "2026-03-13T19:59:00",
+      "metadata": {
+        "agent_name": "Super Z",
+        "tool": "planning",
+        "skill": "fullstack-dev"
+      }
+    }
+  }
+```
+
+**Why it matters:** In multi-agent scenarios, knowing which agent created a TODO helps with task ownership and debugging workflow issues.
+
+### Shell History Metadata
+
+Shell commands support metadata for agent attribution:
+
+```bash
+POST /api/shell/add {
+  "command": "npm install express",
+  "status": "completed",
+  "output_preview": "added 57 packages",
+  "agent_name": "LocalClaw",    # Who ran this command
+  "tool": "shell",              # Which tool executed it
+  "metadata": {                 # Or pass full metadata object
+    "agent_name": "LocalClaw",
+    "tool": "shell",
+    "working_dir": "/home/z/my-project"
+  }
+}
+
+# Response includes metadata
+→ {
+    "success": true,
+    "entry": {
+      "id": "143055-def456",
+      "command": "npm install express",
+      "timestamp": "2026-03-13T19:59:30",
+      "status": "completed",
+      "output_preview": "added 57 packages",
+      "metadata": {
+        "agent_name": "LocalClaw",
+        "tool": "shell",
+        "working_dir": "/home/z/my-project"
+      }
+    }
+  }
+```
+
+**Why it matters:** When multiple agents share a session, seeing who ran each command helps understand the workflow and debug issues.
+
+
 
 ### Activity Hints (v1.0.1)
 
