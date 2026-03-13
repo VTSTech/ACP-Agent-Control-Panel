@@ -154,9 +154,22 @@ The complete session state is stored in a single JSON file:
   "shell_history": ["<ShellEntry>", "..."],
   "ai_notes": ["<Note>", "..."],
   "session_start": 1700000000.0,
-  "last_activity": 1700001000.0
+  "last_activity": 1700001000.0,
+  "nudge": null,
+  "primary_agent": "Super Z",
+  "agent_tokens": {
+    "Super Z": 42000,
+    "LocalClaw": 500
+  }
 }
 ```
+
+#### Per-Agent Token Fields
+
+| Field | Description |
+|-------|-------------|
+| `primary_agent` | First agent to log activity; owns the main context window |
+| `agent_tokens` | Token usage breakdown per agent name |
 
 ### 3.2 Activity Object
 
@@ -262,6 +275,11 @@ interface TODO {
   status: TODOStatus;      // pending | in_progress | completed
   priority: Priority;      // high | medium | low
   created: string;         // ISO 8601 timestamp
+  metadata?: {             // Optional attribution metadata
+    agent_name?: string;   // Agent that created this TODO
+    tool?: string;         // Tool that created it
+    skill?: string;        // Skill that created it
+  };
 }
 ```
 
@@ -274,6 +292,10 @@ interface ShellEntry {
   timestamp: string;       // ISO 8601 timestamp
   status: ShellStatus;     // running | completed | error
   output_preview: string;  // Output snippet (max 200 chars)
+  metadata?: {             // Optional attribution metadata
+    agent_name?: string;   // Agent that ran this command
+    tool?: string;         // Tool that executed it
+  };
 }
 ```
 
@@ -345,9 +367,29 @@ Check stop flag and token usage.
   "tokens_remaining": 155000,
   "tokens_percent": 22.5,
   "overflow_warning": null,
+  "primary_agent": "Super Z",
+  "agent_tokens": {
+    "Super Z": 42000,
+    "LocalClaw": 500
+  },
+  "other_agents_tokens": 500,
   "session": { "<SessionInfo>" }
 }
 ```
+
+### Per-Agent Token Tracking
+
+The first agent to log an activity becomes the "primary agent" and owns the main context window. Other agents (subagents, LocalClaw, etc.) are tracked separately.
+
+**Fields:**
+| Field | Description |
+|-------|-------------|
+| `primary_agent` | Name of the first agent to log an activity (owns context) |
+| `agent_tokens` | Object mapping agent names to their token usage |
+| `other_agents_tokens` | Sum of tokens from non-primary agents |
+| `session_tokens` | Only reflects primary agent's context consumption |
+
+**Why it matters:** Subagents and other agents won't pollute the primary agent's context window estimation, providing accurate tracking for the main session.
 
 #### GET /api/running
 
@@ -656,7 +698,10 @@ Add single TODO item.
     "content": "New task",
     "status": "pending",
     "priority": "high"
-  }
+  },
+  "agent_name": "Super Z",
+  "tool": "planning",
+  "skill": "fullstack-dev"
 }
 ```
 
@@ -666,6 +711,9 @@ Add single TODO item.
 | `todo.content` | string | Yes | Task description |
 | `todo.status` | string | No | `pending`, `in_progress`, or `completed` (default: `pending`) |
 | `todo.priority` | string | No | `high`, `medium`, or `low` (default: `medium`) |
+| `agent_name` | string | No | Name of agent creating the TODO |
+| `tool` | string | No | Tool that created the TODO |
+| `skill` | string | No | Skill that created the TODO |
 
 #### POST /api/todos/clear
 
@@ -686,7 +734,9 @@ Add shell command to history.
 {
   "command": "ls -la",
   "status": "completed",
-  "output_preview": "total 64\ndrwxr-xr-x..."
+  "output_preview": "total 64\ndrwxr-xr-x...",
+  "agent_name": "Super Z",
+  "tool": "shell"
 }
 ```
 
@@ -696,6 +746,9 @@ Add shell command to history.
 | `command` | string | Yes | Command executed (max 500 chars) |
 | `status` | string | No | `running`, `completed`, or `error` (default: `completed`) |
 | `output_preview` | string | No | Output snippet (max 200 chars) |
+| `agent_name` | string | No | Name of agent running the command |
+| `tool` | string | No | Tool that executed the command |
+| `metadata` | object | No | Additional metadata (can include agent_name, tool, etc.) |
 
 #### POST /api/shell/clear
 
