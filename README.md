@@ -72,6 +72,8 @@ The full implementation includes everything in minimal plus:
 | GET | `/api/history` | Get activity history |
 | POST | `/api/reset` | Clear all session data |
 | GET | `/api/activity/{id}` | **v1.0.1** Get single activity by ID |
+| GET | `/api/whoami` | **v1.0.1** Agent self-awareness and identity hint |
+| GET | `/api/csrf-token` | Get CSRF token (if enabled) |
 
 ### Extended Endpoints (Full Version)
 
@@ -81,6 +83,8 @@ The full implementation includes everything in minimal plus:
 | GET | `/api/files/view` | View file content with token count |
 | GET | `/api/changelog` | Get version history |
 | GET | `/api/summary` | Get session summary for context recovery |
+| POST | `/api/summary/export` | Export summary to markdown file |
+| GET | `/api/notes` | Get all saved notes |
 | POST | `/api/notes/add` | Add note for context recovery |
 
 ### Action Parameters (v1.0.1)
@@ -92,7 +96,7 @@ The full implementation includes everything in minimal plus:
 | `details` | string | Human-readable description |
 | `content_size` | integer | Character count for accurate token tracking |
 | `priority` | string | `high` \| `medium` \| `low` (default: medium) |
-| `metadata` | object | Arbitrary key-value pairs |
+| `metadata` | object | Arbitrary key-value pairs (e.g., `{"agent_name": "Super Z"}`) |
 
 ### Action Types
 
@@ -100,19 +104,25 @@ The full implementation includes everything in minimal plus:
 |--------|----------------|---------|
 | `READ` | `/path/to/file.py` | File being read |
 | `WRITE` | `/path/to/output.md` | File being written |
-| `EXECUTE` | `npm install` | Shell command |
+| `EDIT` | `/path/to/file.py` | File being modified |
+| `BASH` | `npm install` | Shell command |
 | `SEARCH` | `pattern` | Search operation |
-| `LLM` | `claude-3-opus` | LLM interaction |
+| `SKILL` | `image-generation` | Skill invocation |
+| `API` | `POST https://api.example.com` | External API call |
 | `TODO` | `task-id-123` | TODO update |
-| `WEB` | `https://example.com` | Web request |
+| `CHAT` | `discussion topic` | **v1.0.1** Conversational/cognitive work |
 
 ## Integration Pattern
 
 Agents should follow this workflow:
 
 ```
+0. SESSION START (recommended)
+   GET /api/whoami  → Establish identity (use agent_name in metadata)
+   GET /api/todos   → Restore TODO state
+
 1. CHECK STATUS → GET /api/status (check stop_flag)
-2. LOG ACTION   → POST /api/action (with action, target, details)
+2. LOG ACTION   → POST /api/action (with action, target, details, metadata)
 3. EXECUTE      → Do the actual work
 4. COMPLETE     → POST /api/action (with complete_id, result)
 ```
@@ -124,6 +134,10 @@ import requests
 
 ACP_URL = "http://localhost:8766"
 AUTH = ("admin", "secret")
+
+# 0. Session start - establish identity
+whoami = requests.get(f"{ACP_URL}/api/whoami", auth=AUTH).json()
+agent_name = "MyAgent"  # Use this in all activity metadata
 
 # 1. Check if we should stop
 status = requests.get(f"{ACP_URL}/api/status", auth=AUTH).json()
@@ -137,7 +151,7 @@ resp = requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
     "target": "/home/user/project/main.py",
     "details": "Reading source file",
     "priority": "high",
-    "metadata": {"source": "user_request"}
+    "metadata": {"agent_name": agent_name, "source": "user_request"}
 })
 activity_id = resp.json()["activity_id"]
 
@@ -157,17 +171,18 @@ requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ACP_PORT` | `8766` | Server port |
-| `ACP_USER` | `admin` | HTTP Basic Auth username |
-| `ACP_PASS` | `secret` | HTTP Basic Auth password |
-| `ACP_DATA_FILE` | `acp_data.json` | Session storage file |
-| `ACP_CONTEXT_WINDOW` | `200000` | Token limit for progress bar |
-| `GLMACP_CONTEXT_WINDOW` | `200000` | (Full version) Alias for above |
+| `GLMACP_PORT` | `8766` | Server port |
+| `GLMACP_USER` | `vtstech` | HTTP Basic Auth username |
+| `GLMACP_PASS` | `nopenope` | HTTP Basic Auth password |
+| `GLMACP_CSRF_ENABLED` | `false` | Enable CSRF protection (recommended for production) |
+| `GLMACP_CONTEXT_WINDOW` | `200000` | Token limit for progress bar |
+| `GLMACP_SESSION_TIMEOUT` | `86400` | Session timeout in seconds |
+| `GLMACP_MAX_UPLOAD_SIZE` | `104857600` | Max upload size (100MB) |
 
 ## Documentation
 
 - **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.1)
-- **[ACP-Agent-Guide.md](./ACP-Agent-Guide.md)** - Quick integration guide for agents (Draft 1.1)
+- **[ACP-Agent-Guide.md](./ACP-Agent-Guide.md)** - Quick integration guide for agents (v1.0.1)
 
 ## Screenshots
 
