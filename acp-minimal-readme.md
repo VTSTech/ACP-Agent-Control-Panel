@@ -62,10 +62,18 @@ Open `http://localhost:8766` in your browser.
 # Check status
 curl -u admin:secret http://localhost:8766/api/status
 
-# Log an action
+# whoami - establish identity
+curl -u admin:secret http://localhost:8766/api/whoami
+
+# Log an action with v1.0.1 metadata
 curl -u admin:secret -X POST http://localhost:8766/api/action \
   -H "Content-Type: application/json" \
-  -d '{"action":"READ","target":"config.py","details":"Loading config"}'
+  -d '{"action":"READ","target":"config.py","details":"Loading config","priority":"high","metadata":{"agent_name":"MyAgent"}}'
+
+# Log with content_size for accurate token tracking
+curl -u admin:secret -X POST http://localhost:8766/api/action \
+  -H "Content-Type: application/json" \
+  -d '{"action":"READ","target":"large_file.py","content_size":35000,"metadata":{"agent_name":"MyAgent"}}'
 
 # Complete previous + start new in one call
 curl -u admin:secret -X POST http://localhost:8766/api/action \
@@ -77,6 +85,14 @@ curl -u admin:secret -X POST http://localhost:8766/api/action \
     "target": "config.py",
     "details": "Fixing bug"
   }'
+
+# Get single activity
+curl -u admin:secret http://localhost:8766/api/activity/123456-abc123
+
+# Add a note for context recovery
+curl -u admin:secret -X POST http://localhost:8766/api/notes/add \
+  -H "Content-Type: application/json" \
+  -d '{"category":"decision","content":"Using PostgreSQL for scalability","importance":"high"}'
 
 # STOP ALL
 curl -u admin:secret -X POST http://localhost:8766/api/stop \
