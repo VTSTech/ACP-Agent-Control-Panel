@@ -4,6 +4,56 @@
 
 ---
 
+## ⚠️ SESSION START PROTOCOL (DO THIS FIRST)
+
+**Before doing ANYTHING else in this session:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  SESSION START CHECKLIST (MANDATORY)                            │
+├─────────────────────────────────────────────────────────────────┤
+│  1. Check if ACP server is running:                             │
+│     curl -s -u admin:secret http://localhost:8766/api/status    │
+│                                                                 │
+│  2. If running, you MUST follow ACP Workflow for ALL actions    │
+│  3. If not running, proceed normally (no ACP integration)       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**ACP is ACTIVE if:** Response contains `{"success": true, ...}`  
+**ACP is INACTIVE if:** Connection refused or no response
+
+---
+
+## ❌ COMMON MISTAKES (AVOID THESE)
+
+| Mistake | What Happens | Correct Approach |
+|---------|--------------|------------------|
+| **Forgetting to log before executing** | Activity not tracked, tokens inaccurate | ALWAYS call `/api/action` BEFORE using Read/Write/Edit/Bash |
+| **Using native tools without logging** | Context window estimation wrong | Include `content_size` parameter |
+| **Starting work without checking ACP status** | May miss stop_flag or nudge | Check `/api/status` at session start |
+| **Not completing activities** | Orphan tasks pile up | Always call `/api/complete` when done |
+| **Multiple agents without attribution** | Can't tell who did what | Use `agent_name` in metadata |
+
+---
+
+## 🔄 EVERY-ACTION TRIGGER
+
+**Before EVERY file read, write, edit, or bash command:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  STOP! Did you log this action to ACP?                          │
+├─────────────────────────────────────────────────────────────────┤
+│  □ POST /api/action {"action": "READ|WRITE|EDIT|BASH", ...}   │
+│  □ Get activity_id from response                                │
+│  □ NOW you can execute the action                               │
+│  □ POST /api/complete when done                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## MANDATORY INTEGRATION REQUIREMENTS
 
 **All agents using ACP MUST:**
