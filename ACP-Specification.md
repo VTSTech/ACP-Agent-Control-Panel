@@ -1191,8 +1191,8 @@ Context recovery allows AI agents to restore session state after:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GLMACP_PORT` | `8766` | Server port |
-| `GLMACP_USER` | `vtstech` | Authentication username |
-| `GLMACP_PASS` | `nopenope` | Authentication password |
+| `GLMACP_USER` | `admin` | Authentication username |
+| `GLMACP_PASS` | `secret` | Authentication password |
 | `GLMACP_CSRF_ENABLED` | `false` | Enable CSRF protection (recommended for production) |
 | `GLMACP_CSRF_SECRET` | *(random)* | CSRF signing secret |
 | `GLMACP_SESSION_TIMEOUT` | `86400` | Session timeout in seconds |

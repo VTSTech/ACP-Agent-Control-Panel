@@ -172,8 +172,8 @@ requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GLMACP_PORT` | `8766` | Server port |
-| `GLMACP_USER` | `vtstech` | HTTP Basic Auth username |
-| `GLMACP_PASS` | `nopenope` | HTTP Basic Auth password |
+| `GLMACP_USER` | `admin` | HTTP Basic Auth username |
+| `GLMACP_PASS` | `secret` | HTTP Basic Auth password |
 | `GLMACP_CSRF_ENABLED` | `false` | Enable CSRF protection (recommended for production) |
 | `GLMACP_CONTEXT_WINDOW` | `200000` | Token limit for progress bar |
 | `GLMACP_SESSION_TIMEOUT` | `86400` | Session timeout in seconds |
