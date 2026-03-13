@@ -58,6 +58,9 @@ The full implementation includes everything in minimal plus:
 | **v1.0.1** Activity Hints | Contextual hints in /api/action response |
 | **v1.0.1** CHAT Action Type | Track conversational/cognitive work |
 | **v1.0.1** whoami Endpoint | GET /api/whoami for agent self-awareness |
+| **v1.0.2** Nudge API | Human guidance via synchronous message delivery |
+| **v1.0.2** Orphan Detection | Warning when starting tasks with running activities |
+| **v1.0.2** Nudge Priority | `normal` \| `high` \| `urgent` priority levels |
 
 ## API Reference
 
@@ -74,6 +77,9 @@ The full implementation includes everything in minimal plus:
 | GET | `/api/activity/{id}` | **v1.0.1** Get single activity by ID |
 | GET | `/api/whoami` | **v1.0.1** Agent self-awareness and identity hint |
 | GET | `/api/csrf-token` | Get CSRF token (if enabled) |
+| POST | `/api/nudge` | **v1.0.2** Send guidance to agent |
+| GET | `/api/nudge` | **v1.0.2** Check pending nudge |
+| POST | `/api/nudge/ack` | **v1.0.2** Acknowledge nudge |
 
 ### Extended Endpoints (Full Version)
 
@@ -181,8 +187,8 @@ requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
 
 ## Documentation
 
-- **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.1)
-- **[ACP-Agent-Guide.md](./ACP-Agent-Guide.md)** - Quick integration guide for agents (v1.0.1)
+- **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.2)
+- **[ACP-Agent-Guide.md](./ACP-Agent-Guide.md)** - Quick integration guide for agents (v1.0.2)
 
 ## Screenshots
 
