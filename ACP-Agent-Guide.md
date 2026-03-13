@@ -352,13 +352,17 @@ POST /api/complete {
 # HTTP Basic Auth
 Authorization: Basic base64(user:pass)
 
-# CSRF Token (required for all POST)
+# CSRF Token (optional - check if enabled)
 X-CSRF-Token: <timestamp>:<signature>
 
-# Get CSRF token
+# Check CSRF status and get token
 GET /api/csrf-token
-→ {"csrf_token": "1234567890:abc123...", "expires_in": 3600}
+→ {"csrf_enabled": true, "csrf_token": "1234567890:abc123...", "expires_in": 3600}
+# OR if disabled:
+→ {"csrf_enabled": false, "message": "CSRF protection is disabled. Token not required."}
 ```
+
+**Note:** CSRF protection is **disabled by default** for development convenience. Check `/api/csrf-token` to determine if tokens are required.
 
 ---
 
@@ -367,7 +371,7 @@ GET /api/csrf-token
 | Code | Meaning | Action |
 |------|---------|--------|
 | 401 | Auth failed | Check credentials, retry |
-| 403 | Stop requested / Invalid CSRF | STOP if stop_flag, else refresh CSRF |
+| 403 | Stop requested / Invalid CSRF (if enabled) | STOP if stop_flag, else refresh CSRF |
 | 404 | Not found | Activity or file doesn't exist |
 | 413 | File too large | Use download instead of view |
 | 429 | Rate limited | Wait before retrying |

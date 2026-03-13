@@ -1158,7 +1158,9 @@ Context recovery allows AI agents to restore session state after:
 
 ### 7.2 CSRF Protection
 
-- All POST requests require valid CSRF token
+- CSRF protection is **optional** and **disabled by default**
+- Enable via `GLMACP_CSRF_ENABLED=true` for production deployments
+- When enabled, all POST requests require valid CSRF token
 - Tokens expire after configurable timeout (default: 1 hour)
 - Tokens are signed with server-side secret
 
@@ -1191,6 +1193,7 @@ Context recovery allows AI agents to restore session state after:
 | `GLMACP_PORT` | `8766` | Server port |
 | `GLMACP_USER` | `vtstech` | Authentication username |
 | `GLMACP_PASS` | `nopenope` | Authentication password |
+| `GLMACP_CSRF_ENABLED` | `false` | Enable CSRF protection (recommended for production) |
 | `GLMACP_CSRF_SECRET` | *(random)* | CSRF signing secret |
 | `GLMACP_SESSION_TIMEOUT` | `86400` | Session timeout in seconds |
 | `GLMACP_STARTUP_TOKENS` | `3000` | Initial token overhead |
@@ -1329,6 +1332,7 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 - **DOC**: Added parameter tables to API endpoint documentation
 - **DOC**: Updated architecture diagram to show `/api/action` as recommended endpoint
 - **DOC**: Added CHAT to `activity_breakdown` example in `/api/summary` response
+- **CHG**: CSRF protection now optional (disabled by default) - enable via `GLMACP_CSRF_ENABLED=true`
 
 ### v1.0.0
 - Initial specification release
