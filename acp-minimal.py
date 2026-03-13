@@ -84,7 +84,10 @@ UI_HTML = """<!DOCTYPE html>
         .activity.cancelled { border-left-color: #f0883e; opacity: 0.7; }
         .activity-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
         .activity-action { font-weight: 600; font-size: 0.8rem; padding: 2px 8px; border-radius: 4px; background: #21262d; }
+        .activity-action.priority-high { background: #da3633; }
+        .activity-action.priority-low { background: #6e7681; }
         .activity-target { font-family: monospace; font-size: 0.85rem; color: #8b949e; }
+        .activity-meta { font-size: 0.75rem; color: #58a6ff; margin-top: 3px; }
         .activity-time { font-size: 0.75rem; color: #6e7681; }
         .activity-result { font-size: 0.8rem; color: #8b949e; margin-top: 5px; padding-top: 5px; border-top: 1px solid #21262d; }
         .shell-list { display: flex; flex-direction: column; gap: 6px; }
@@ -185,16 +188,21 @@ UI_HTML = """<!DOCTYPE html>
             const actList = document.getElementById('activity-list');
             if (data.running?.length > 0 || data.history?.length > 0) {
                 const items = [...(data.running || []), ...(data.history || []).slice(0, 20)];
-                actList.innerHTML = items.map(a => `
+                actList.innerHTML = items.map(a => {
+                    const priority = a.priority || 'medium';
+                    const agentName = a.metadata?.agent_name || '';
+                    const priorityClass = priority === 'high' ? 'priority-high' : priority === 'low' ? 'priority-low' : '';
+                    return `
                     <div class="activity ${a.status}">
                         <div class="activity-header">
-                            <span class="activity-action">${a.action}</span>
+                            <span class="activity-action ${priorityClass}">${a.action}</span>
                             <span class="activity-time">${a.status} ${a.completed ? '✓' : '⏳'}</span>
                         </div>
                         <div class="activity-target">${a.target}</div>
+                        ${agentName ? `<div class="activity-meta">👤 ${agentName}</div>` : ''}
                         ${a.result ? `<div class="activity-result">${a.result}</div>` : ''}
                     </div>
-                `).join('');
+                `}).join('');
             } else {
                 actList.innerHTML = '<div class="empty">No activity yet</div>';
             }
