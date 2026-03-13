@@ -19,6 +19,7 @@ AUTH_USER = os.environ.get("ACP_USER", "admin")
 AUTH_PASS = os.environ.get("ACP_PASS", "secret")
 DATA_FILE = os.environ.get("ACP_DATA_FILE", "acp_data.json")
 CONTEXT_WINDOW = int(os.environ.get("ACP_CONTEXT_WINDOW", "200000"))
+VERSION = "v1.0.1"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATA STORAGE
@@ -28,7 +29,7 @@ def load_data():
         with open(DATA_FILE, 'r') as f:
             return json.load(f)
     return {"running": [], "history": [], "stop_flag": False, "stop_reason": None, 
-            "tokens": 0, "shell": [], "todos": []}
+            "tokens": 0, "shell": [], "todos": [], "notes": []}
 
 def save_data(data):
     with open(DATA_FILE, 'w') as f:
@@ -302,6 +303,7 @@ class ACPHandler(BaseHTTPRequestHandler):
             data = load_data()
             tokens = data.get("tokens", 0)
             self.send_json({
+                "success": True,
                 "stop_flag": data["stop_flag"],
                 "stop_reason": data["stop_reason"],
                 "running": data["running"],
@@ -310,8 +312,31 @@ class ACPHandler(BaseHTTPRequestHandler):
                 "todos": data.get("todos", [])[-10:],
                 "tokens": tokens,
                 "tokens_percent": round(tokens / CONTEXT_WINDOW * 100, 1),
-                "tokens_remaining": max(0, CONTEXT_WINDOW - tokens)
+                "tokens_remaining": max(0, CONTEXT_WINDOW - tokens),
+                "context_window": CONTEXT_WINDOW,
+                "version": VERSION
             })
+        
+        elif self.path == '/api/whoami':
+            self.send_json({
+                "success": True,
+                "identity": {
+                    "hint": "You are an AI agent. Identify yourself by name.",
+                    "suggestion": "Use agent_name in activity metadata.",
+                    "example": {"metadata": {"agent_name": "MyAgent"}}
+                },
+                "version": VERSION
+            })
+        
+        elif self.path.startswith('/api/activity/'):
+            data = load_data()
+            act_id = self.path.split('/')[-1]
+            # Search in running and history
+            for act in data.get("running", []) + data.get("history", []):
+                if act.get("id") == act_id:
+                    self.send_json({"success": True, "activity": act})
+                    return
+            self.send_json({"success": False, "error": "Activity not found"}, 404)
         
         else:
             self.send_json({"error": "Not found"}, 404)
@@ -345,16 +370,27 @@ class ACPHandler(BaseHTTPRequestHandler):
             action = req.get('action', 'UNKNOWN')
             target = req.get('target', '')
             details = req.get('details', '')
-            tokens = int(len(action) + len(target) + len(details)) // 3.5
+            content_size = req.get('content_size', 0)
+            priority = req.get('priority', 'medium')
+            metadata = req.get('metadata', {})
+            
+            # Token estimation: basic fields + content_size
+            tokens = int((len(action) + len(target) + len(details) + content_size) / 3.5)
             data["tokens"] = data.get("tokens", 0) + tokens
             
             act_id = datetime.now().strftime("%H%M%S-") + str(int(time.time() * 1000) % 100000)
-            activity = {"id": act_id, "action": action, "target": target, "details": details, 
-                       "status": "running", "started": datetime.now().isoformat()}
+            activity = {
+                "id": act_id, "action": action, "target": target, "details": details,
+                "status": "running", "started": datetime.now().isoformat(),
+                "priority": priority, "metadata": metadata
+            }
             data.setdefault("running", []).append(activity)
             save_data(data)
-            self.send_json({"activity_id": act_id, "stop_flag": False, "tokens": data["tokens"],
-                          "tokens_remaining": max(0, CONTEXT_WINDOW - data["tokens"])})
+            self.send_json({
+                "success": True, "activity_id": act_id, "stop_flag": False,
+                "tokens": data["tokens"], "tokens_percent": round(data["tokens"] / CONTEXT_WINDOW * 100, 1),
+                "tokens_remaining": max(0, CONTEXT_WINDOW - data["tokens"])
+            })
 
         elif self.path == '/api/stop':
             data = load_data()
@@ -393,6 +429,19 @@ class ACPHandler(BaseHTTPRequestHandler):
             data["todos"] = req.get('todos', [])
             save_data(data)
             self.send_json({"success": True})
+        
+        elif self.path == '/api/notes/add':
+            data = load_data()
+            note = {
+                "category": req.get('category', 'context'),
+                "content": req.get('content', '')[:500],
+                "importance": req.get('importance', 'normal'),
+                "timestamp": datetime.now().isoformat()
+            }
+            data.setdefault("notes", []).insert(0, note)
+            if len(data["notes"]) > 50: data["notes"] = data["notes"][:50]
+            save_data(data)
+            self.send_json({"success": True})
 
         else:
             self.send_json({"error": "Not found"}, 404)
@@ -401,7 +450,7 @@ class ACPHandler(BaseHTTPRequestHandler):
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    print(f"ACP Minimal starting on port {PORT}")
+    print(f"ACP Minimal {VERSION} starting on port {PORT}")
     print(f"Auth: {AUTH_USER}:{AUTH_PASS}")
     print(f"Open http://localhost:{PORT} in browser")
     HTTPServer(('0.0.0.0', PORT), ACPHandler).serve_forever()

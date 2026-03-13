@@ -2,16 +2,20 @@
 
 A barebones implementation of the [ACP (Agent Control Panel) Specification](https://github.com/VTSTech/ACP-Agent-Control-Panel) with a basic web UI.
 
+**Version:** v1.0.1 | **~450 lines** of Python with no external dependencies.
+
 ## Features
 
 - **Activity Monitoring**: Real-time activity tracking with status
-- **Token Tracking**: Context window usage estimation
+- **Token Tracking**: Context window usage estimation with `content_size` support
 - **STOP ALL**: Emergency stop capability  
 - **Shell History**: Terminal command logging
 - **TODO List**: Task tracking
+- **Notes**: Context recovery notes (v1.0.1)
+- **whoami**: Agent self-awareness endpoint (v1.0.1)
+- **Activity Lookup**: GET /api/activity/{id} (v1.0.1)
+- **Metadata Support**: priority, agent_name, custom fields (v1.0.1)
 - **Basic Web UI**: Dark theme dashboard
-
-**~400 lines** of Python with no external dependencies.
 
 ## Quick Start
 
@@ -31,12 +35,26 @@ Open `http://localhost:8766` in your browser.
 |----------|--------|-------------|
 | `/` | GET | Web UI dashboard |
 | `/api/status` | GET | Full session status |
+| `/api/whoami` | GET | **v1.0.1** Agent self-awareness |
+| `/api/activity/{id}` | GET | **v1.0.1** Single activity lookup |
 | `/api/action` | POST | Log activity, complete previous |
 | `/api/stop` | POST | Trigger STOP ALL |
 | `/api/resume` | POST | Clear stop flag |
 | `/api/reset` | POST | Reset session |
 | `/api/shell/add` | POST | Add shell command |
 | `/api/todos/update` | POST | Update TODO list |
+| `/api/notes/add` | POST | **v1.0.1** Add context note |
+
+### Action Parameters (v1.0.1)
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `action` | string | Action type (required) |
+| `target` | string | File path, command, or resource (required) |
+| `details` | string | Human-readable description |
+| `content_size` | integer | Character count for accurate token tracking |
+| `priority` | string | `high` \| `medium` \| `low` (default: medium) |
+| `metadata` | object | Arbitrary key-value pairs (e.g., `{"agent_name": "MyAgent"}`) |
 
 ## Usage Examples
 
