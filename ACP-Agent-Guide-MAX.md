@@ -290,7 +290,7 @@ POST /api/complete {
 **Standard metadata fields:**
 
 | Field | Description | Example |
-|-------|-------------|--------|
+|-------|-------------|---------|
 | `agent_name` | Name of agent/subagent | `"Super Z"`, `"full-stack-developer"` |
 | `source` | Origin of action | `"user_request"`, `"auto"`, `"subagent"` |
 | `tool_name` | Native tool used | `"Read"`, `"Write"`, `"Bash"` |
