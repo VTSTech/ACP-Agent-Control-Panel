@@ -739,9 +739,19 @@ Get condensed session summary for context recovery.
 }
 ```
 
-#### POST /api/summary/export
+#### GET /api/summary/export
 
 Export summary to persistent markdown file for sharing with new sessions.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Summary exported to persistent file",
+  "filepath": "/path/to/acp_session_summary.md",
+  "note": "Share this file with new AI sessions for context recovery"
+}
+```
 
 #### GET /api/notes
 
@@ -1321,6 +1331,10 @@ Context recovery allows AI agents to restore session state after:
 | `GLMACP_PORT` | `8766` | Server port |
 | `GLMACP_USER` | `admin` | Authentication username |
 | `GLMACP_PASS` | `secret` | Authentication password |
+| `GLMACP_DATA_FILE` | `./agent_activity.json` | Session state storage file path |
+| `GLMACP_FILES_DIR` | *(script parent)* | Base directory for file manager |
+| `GLMACP_SUMMARY_FILE` | `./acp_session_summary.md` | Context recovery summary file path |
+| `GLMACP_QUIET` | `false` | Suppress server log output |
 | `GLMACP_CSRF_ENABLED` | `false` | Enable CSRF protection (recommended for production) |
 | `GLMACP_CSRF_SECRET` | *(random)* | CSRF signing secret |
 | `GLMACP_SESSION_TIMEOUT` | `86400` | Session timeout in seconds |
@@ -1448,7 +1462,11 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 - **NEW**: `nudge` field in `/api/action` response - delivers pending nudge synchronously
 - **NEW**: Nudge priority levels: `normal`, `high`, `urgent`
 - **NEW**: `requires_ack` option to block until acknowledged
+- **NEW**: `orphan_warning` field in `/api/action` response - alerts about orphan running tasks
 - **DOC**: Added §4.9 Nudge API section
+- **DOC**: Added Orphan Warning documentation in §4.3
+- **DOC**: Documented `GLMACP_DATA_FILE`, `GLMACP_FILES_DIR`, `GLMACP_SUMMARY_FILE`, `GLMACP_QUIET` environment variables
+- **FIX**: Corrected `/api/summary/export` HTTP method from POST to GET in documentation
 - **UI**: Added Nudge button and modal in GLMACP web interface
 
 ### v1.0.1
