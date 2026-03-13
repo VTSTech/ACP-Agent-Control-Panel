@@ -160,6 +160,10 @@ The complete session state is stored in a single JSON file:
   "agent_tokens": {
     "Super Z": 42000,
     "LocalClaw": 500
+  },
+  "files_read_tokens": {
+    "/path/to/file.py": 1500,
+    "/path/to/config.json": 800
   }
 }
 ```
@@ -170,6 +174,7 @@ The complete session state is stored in a single JSON file:
 |-------|-------------|
 | `primary_agent` | First agent to log activity; owns the main context window |
 | `agent_tokens` | Token usage breakdown per agent name |
+| `files_read_tokens` | Tracks files already counted for token deduplication |
 
 ### 3.2 Activity Object
 
