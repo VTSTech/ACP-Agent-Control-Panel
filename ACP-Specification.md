@@ -312,13 +312,17 @@ Authorization: Basic base64(username:password)
 
 ### 4.2 CSRF Protection
 
-All POST requests require a CSRF token header:
+CSRF protection is **optional** and **disabled by default** for development/testing convenience.
+
+When enabled (via `GLMACP_CSRF_ENABLED=true`), all POST requests require a CSRF token header:
 
 ```
 X-CSRF-Token: <timestamp>:<signature>
 ```
 
-Obtain token via `GET /api/csrf-token`.
+Obtain token via `GET /api/csrf-token`. The response includes `csrf_enabled` to indicate whether CSRF is active.
+
+**Recommendation:** Enable CSRF for production deployments exposed to untrusted networks.
 
 ### 4.3 Activity Monitor Endpoints
 
@@ -925,7 +929,29 @@ Restart the ACP server. Useful for applying configuration changes.
 
 #### GET /api/csrf-token
 
-Get CSRF token for POST requests.
+Get CSRF token for POST requests. Also indicates whether CSRF protection is enabled.
+
+**Response (CSRF enabled):**
+```json
+{
+  "success": true,
+  "csrf_enabled": true,
+  "csrf_token": "1234567890:abc123...",
+  "expires_in": 3600,
+  "message": null
+}
+```
+
+**Response (CSRF disabled - default):**
+```json
+{
+  "success": true,
+  "csrf_enabled": false,
+  "csrf_token": null,
+  "expires_in": null,
+  "message": "CSRF protection is disabled. Token not required."
+}
+```
 
 #### GET /api/whoami
 
