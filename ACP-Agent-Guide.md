@@ -1,6 +1,7 @@
 # ACP Agent Quick Reference
 
-**Version:** Draft 1.0.2 | **Spec:** See ACP-Specification.md for full details
+**Version:** Draft 1.0.2 | **Spec:** See ACP-Specification.md for full details  
+**Repository:** https://github.com/VTSTech/ACP-Agent-Control-Panel
 
 ---
 
@@ -465,6 +466,18 @@ GET /api/csrf-token
 | `acp_session_summary.md` | Persistent session state |
 | `agent_activity.json` | Session data storage |
 | `acp_restart.log` | Restart debugging logs |
+
+---
+
+## REPOSITORY
+
+| Resource | URL |
+|----------|-----|
+| **GitHub Repo** | https://github.com/VTSTech/ACP-Agent-Control-Panel |
+| **Issues** | https://github.com/VTSTech/ACP-Agent-Control-Panel/issues |
+| **Author** | https://github.com/VTSTech |
+
+For updates, bug reports, and contributions, visit the GitHub repository.
 
 ---
 
