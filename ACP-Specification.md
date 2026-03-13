@@ -1,6 +1,6 @@
 # Agent Control Panel (ACP) Specification
 
-**Version:** 1.0.1  
+**Version:** 1.0.2  
 **Status:** Draft  
 **Authors:** VTSTech, Community Contributors
 
@@ -534,8 +534,42 @@ Combined endpoint: complete previous + start new in one call.
     "last_action": "EDIT",
     "related_todos": [{"id": "1", "content": "Fix bug in file.py", "status": "pending"}],
     "active_todos": 2
+  },
+  "nudge": null,
+  "orphan_warning": null
+}
+```
+
+### Orphan Warning (v1.0.2)
+
+The `orphan_warning` field alerts agents when they're starting a new task while other tasks are still running:
+
+```json
+{
+  "orphan_warning": {
+    "count": 2,
+    "tasks": [
+      {"id": "143052-abc123", "action": "READ", "target": "/file1.py"},
+      {"id": "143100-def456", "action": "WRITE", "target": "/file2.py"}
+    ],
+    "suggestion": "Complete or acknowledge orphan tasks before starting new work"
   }
 }
+```
+
+**When present:**
+- Indicates running tasks from previous operations that weren't completed
+- The agent should complete these tasks first or acknowledge them
+- Helps prevent "task leakage" where activities pile up in running state
+
+**Agent workflow for orphan handling:**
+```
+1. Check response for orphan_warning
+2. If present:
+   a. Review the orphan tasks list
+   b. Complete each orphan: POST /api/complete {id, result}
+   c. Or acknowledge and proceed if intentional
+3. Continue with new task
 ```
 
 ### Activity Hints (v1.0.1)
@@ -984,6 +1018,100 @@ Self-awareness endpoint for AI agents. Returns identity context to help agents u
    POST /api/action {"metadata": {"agent_name": "Super Z", ...}}
 ```
 
+### 4.9 Nudge API (v1.0.2)
+
+Synchronous nudges allow humans to provide mid-task guidance. Unlike WebSockets, nudges are delivered synchronously on the agent's next `/api/action` call.
+
+#### POST /api/nudge
+
+Create a nudge to be delivered on next action.
+
+**Request:**
+```json
+{
+  "message": "Focus on the API first",
+  "priority": "high",
+  "requires_ack": true
+}
+```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message` | string | Yes | Guidance message for the agent |
+| `priority` | string | No | `normal` (default), `high`, or `urgent` |
+| `requires_ack` | boolean | No | If true, agent must call `/api/nudge/ack` (default: true) |
+
+**Response:**
+```json
+{
+  "success": true,
+  "nudge": {
+    "message": "Focus on the API first",
+    "priority": "high",
+    "requires_ack": true,
+    "timestamp": "2025-03-13T17:50:00",
+    "from": "human",
+    "acknowledged": false
+  },
+  "message": "Nudge queued for next action"
+}
+```
+
+#### GET /api/nudge
+
+Check if a nudge is pending.
+
+**Response:**
+```json
+{
+  "success": true,
+  "nudge": {...},
+  "has_pending": true
+}
+```
+
+#### POST /api/nudge/ack
+
+Acknowledge a nudge (clears it).
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Nudge acknowledged"
+}
+```
+
+#### Nudge Delivery on /api/action
+
+The nudge is delivered in the `/api/action` response:
+
+```json
+POST /api/action {"action": "READ", "target": "file.py"}
+→ {
+  "success": true,
+  "activity_id": "...",
+  "nudge": {
+    "message": "Focus on the API first",
+    "priority": "high",
+    "requires_ack": true,
+    "timestamp": "2025-03-13T17:50:00",
+    "from": "human"
+  }
+}
+```
+
+**Agent workflow for nudges:**
+```
+1. Call POST /api/action
+2. If response contains "nudge" field:
+   a. Read the message
+   b. Adjust behavior accordingly
+   c. Call POST /api/nudge/ack (if requires_ack=true)
+3. Continue with task
+```
+
 ---
 
 ## 5. Agent Workflow
@@ -1312,7 +1440,18 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 
 ## Appendix B: Changelog
 
-### v1.0.1 (Current)
+### v1.0.2 (Current)
+- **NEW**: Synchronous Nudge API - human guidance delivered on next `/api/action` call
+- **NEW**: `POST /api/nudge` - Create mid-task guidance message
+- **NEW**: `GET /api/nudge` - Check pending nudge status
+- **NEW**: `POST /api/nudge/ack` - Acknowledge and clear nudge
+- **NEW**: `nudge` field in `/api/action` response - delivers pending nudge synchronously
+- **NEW**: Nudge priority levels: `normal`, `high`, `urgent`
+- **NEW**: `requires_ack` option to block until acknowledged
+- **DOC**: Added §4.9 Nudge API section
+- **UI**: Added Nudge button and modal in GLMACP web interface
+
+### v1.0.1
 - **NEW**: `CHAT` action type for conversational/informational exchanges
 - **NEW**: `content_size` parameter for `/api/start`, `/api/complete`, `/api/action`
 - **NEW**: `complete_content_size` parameter for `/api/action` (combined endpoint)

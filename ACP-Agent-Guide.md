@@ -1,6 +1,6 @@
 # ACP Agent Quick Reference
 
-**Version:** Draft 1.0.1 | **Spec:** See ACP-Specification.md for full details
+**Version:** Draft 1.0.2 | **Spec:** See ACP-Specification.md for full details
 
 ---
 
@@ -55,6 +55,33 @@ POST /api/action {
 | `SEARCH` | Web search, grep, find | Query + results |
 | `TODO` | TODO state changes | Minimal |
 | `CHAT` | Conversational exchanges, Q&A, planning | Input tokens |
+
+### Nudge Handling (v1.0.2)
+
+Check for nudges in every `/api/action` response. Humans can send synchronous guidance:
+
+```bash
+POST /api/action {"action": "READ", "target": "file.py"}
+→ {
+    "activity_id": "...",
+    "nudge": {                    # ← Check this field!
+      "message": "Focus on the API first",
+      "priority": "high",
+      "requires_ack": true,
+      "from": "human"
+    }
+  }
+```
+
+**When nudge received:**
+```bash
+# 1. Read the message and adjust behavior
+# 2. If requires_ack=true, acknowledge it:
+POST /api/nudge/ack {}
+→ {"success": true}
+```
+
+**Why it matters:** Unlike async WebSockets, nudges are delivered synchronously on your next API call - you WILL see them. Use them for mid-task course corrections from humans.
 
 ### Activity Priority (v1.0.1)
 
@@ -476,6 +503,59 @@ GET /api/csrf-token
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### v1.0.2 Quick Additions
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  NEW IN v1.0.2                                               │
+├─────────────────────────────────────────────────────────────┤
+│  • Nudge API: Human guidance via /api/nudge                  │
+│  • Synchronous delivery: nudge field in /api/action response │
+│  • POST /api/nudge/ack - Acknowledge received nudges         │
+│  • Priority levels: normal | high | urgent                   │
+│  • requires_ack: Block until agent acknowledges              │
+│  • orphan_warning: Detects running tasks before starting new │
+│  • Check for nudge AND orphan_warning in EVERY response!     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Orphan Detection (v1.0.2)
+
+Before starting a new task, check if there are orphan running tasks:
+
+```bash
+POST /api/action {"action": "READ", "target": "new_file.py"}
+→ {
+    "activity_id": "...",
+    "running_count": 2,
+    "orphan_warning": {               # ← Check this field!
+      "count": 2,
+      "tasks": [
+        {"id": "abc123", "action": "READ", "target": "old_file.py"},
+        {"id": "def456", "action": "WRITE", "target": "another.py"}
+      ],
+      "suggestion": "Complete or acknowledge orphan tasks"
+    }
+  }
+```
+
+**When orphan_warning present:**
+```bash
+# Complete each orphan task:
+POST /api/complete {"activity_id": "abc123", "result": "Completed late"}
+POST /api/complete {"activity_id": "def456", "result": "Completed late"}
+
+# Or use combined endpoint to complete and proceed:
+POST /api/action {
+  "complete_id": "abc123",
+  "result": "Completed",
+  "action": "READ",
+  "target": "new_file.py"
+}
+```
+
+**Why it matters:** Starting multiple tasks without completing them causes "task leakage" - activities stuck in running state. Always check `orphan_warning` and `running_count` before starting new work.
+
 ### Activity Hints (v1.0.1)
 
 When you call `/api/action`, the response may include `hints`:
@@ -503,4 +583,4 @@ POST /api/action {"action": "EDIT", "target": "/file.py"}
 
 ---
 
-*ACP Agent Guide - Draft 1.0.1*
+*ACP Agent Guide - Draft 1.0.2*
