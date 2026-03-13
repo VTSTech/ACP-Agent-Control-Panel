@@ -4,6 +4,63 @@
 
 ---
 
+## 🧠 IF YOU REMEMBER NOTHING ELSE
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  THE ACP PATTERN (MEMORIZE THIS)                                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   ┌──────────┐    ┌──────────┐    ┌──────────┐                 │
+│   │   LOG    │ →  │ EXECUTE  │ →  │ COMPLETE │                 │
+│   │/api/action│    │Tool/Bash │    │/api/complete│              │
+│   └──────────┘    └──────────┘    └──────────┘                 │
+│                                                                 │
+│   BEFORE        NOW           AFTER                            │
+│                                                                 │
+│   ⚠️ NEVER execute before logging ⚠️                           │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Your mental state should always be:** "I have 0 running activities" between tasks.
+If `activity_id` is set in your context, you MUST complete it before starting new work.
+
+---
+
+## 📋 QUICK DECISION TREE
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  WHAT SHOULD I DO RIGHT NOW?                                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Q: Is this a new session?                                      │
+│     → Run: curl localhost:8766/api/status                       │
+│     → If active, restore: GET /api/todos, GET /api/summary      │
+│                                                                 │
+│  Q: Am I about to use Read/Write/Edit/Bash/Grep/Glob/LS?        │
+│     → STOP! POST /api/action FIRST, get activity_id             │
+│     → Then execute the tool                                     │
+│     → Then POST /api/complete                                   │
+│                                                                 │
+│  Q: Did I just finish an action?                                │
+│     → POST /api/complete with result                            │
+│     → Or use complete_id in next /api/action                    │
+│                                                                 │
+│  Q: Did I see stop_flag=true?                                   │
+│     → STOP all work immediately                                 │
+│     → Tell user, wait for resume                                │
+│                                                                 │
+│  Q: Did I see a nudge in the response?                          │
+│     → Read it, adjust behavior                                  │
+│     → If requires_ack=true, POST /api/nudge/ack                 │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## ⚠️ SESSION START PROTOCOL (DO THIS FIRST)
 
 **Before doing ANYTHING else in this session:**
@@ -25,6 +82,48 @@
 
 ---
 
+## 🔄 EVERY-ACTION TRIGGER (MOST IMPORTANT SECTION)
+
+**This section is the core of ACP integration. Read it twice.**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🛑 STOP! READ THIS BEFORE EVERY ACTION 🛑                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  BEFORE using Read/Write/Edit/Bash/Grep/Glob/LS:                │
+│                                                                 │
+│  □ STEP 1: POST /api/action {"action": "READ|WRITE|EDIT|BASH",  │
+│           "target": "...", "details": "..."}                   │
+│  □ STEP 2: Receive activity_id from response                    │
+│  □ STEP 3: NOW execute the tool (Read/Write/Edit/Bash)          │
+│  □ STEP 4: POST /api/complete {"activity_id": "...", "result":  │
+│           "..."}                                               │
+│                                                                 │
+│  ⚠️ STEPS 1-2 MUST happen BEFORE STEP 3 ⚠️                      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### The Combined Pattern (Recommended)
+
+Use `complete_id` to chain activities - complete previous AND start new in one call:
+
+```bash
+POST /api/action {
+  "complete_id": "prev_activity_id",   # Complete previous (if any)
+  "result": "Previous result",
+  "action": "READ",                     # New action
+  "target": "/path/to/file",
+  "details": "Purpose of this action"
+}
+→ {activity_id, stop_flag, session_tokens}
+```
+
+This pattern ensures you never forget to complete - it's automatic!
+
+---
+
 ## ❌ COMMON MISTAKES (AVOID THESE)
 
 | Mistake | What Happens | Correct Approach |
@@ -34,23 +133,6 @@
 | **Starting work without checking ACP status** | May miss stop_flag or nudge | Check `/api/status` at session start |
 | **Not completing activities** | Orphan tasks pile up | Always call `/api/complete` when done |
 | **Multiple agents without attribution** | Can't tell who did what | Use `agent_name` in metadata |
-
----
-
-## 🔄 EVERY-ACTION TRIGGER
-
-**Before EVERY file read, write, edit, or bash command:**
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  STOP! Did you log this action to ACP?                          │
-├─────────────────────────────────────────────────────────────────┤
-│  □ POST /api/action {"action": "READ|WRITE|EDIT|BASH", ...}   │
-│  □ Get activity_id from response                                │
-│  □ NOW you can execute the action                               │
-│  □ POST /api/complete when done                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
 
 ---
 
