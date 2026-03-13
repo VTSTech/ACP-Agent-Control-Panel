@@ -8,6 +8,9 @@ A lightweight monitoring and observability sidecar for AI agents. Provides real-
 # Minimal version (single file, ~400 lines)
 python acp-minimal.py
 
+# Full version (production ready)
+python VTSTech-GLMACP.py
+
 # Open http://localhost:8766 (default: admin/secret)
 ```
 
@@ -20,6 +23,7 @@ ACP acts as a "dashboard" for AI agents, allowing them to:
 - **Shell History** - Record terminal commands executed
 - **Task Management** - Sync TODO lists and track progress
 - **Stop/Resume** - Allow humans to pause agent activity
+- **Context Recovery** - Preserve session state across context compressions
 
 ## Versions
 
@@ -41,17 +45,19 @@ The full implementation includes everything in minimal plus:
 | **Activity Filters** | Filter by action type, status, date range |
 | **Search** | Full-text search across activities |
 | **Changelog UI** | Version history and release notes |
-| **CSRF Protection** | Security hardening |
+| **Optional CSRF** | Security hardening (disabled by default) |
 | **Rate Limiting** | Prevent API abuse |
 | **Better Token Estimation** | Improved token counting heuristics |
 | **Configurable Context Window** | Environment variable `GLMACP_CONTEXT_WINDOW` |
 | **File Token Deduplication** | Don't double-count re-read files |
 | **Seamless Restarts** | SO_REUSEPORT for zero-downtime reload |
 | **v1.0.1** Activity Priority | `high` \| `medium` \| `low` priority field |
-| **v1.0.1** Activity Metadata | Arbitrary key-value pairs for custom context |
+| **v1.0.1** Activity Metadata | Arbitrary key-value pairs with `agent_name` support |
 | **v1.0.1** Content Size | Accurate token tracking for native tools |
 | **v1.0.1** Activity Lookup | GET /api/activity/{id} endpoint |
 | **v1.0.1** Activity Hints | Contextual hints in /api/action response |
+| **v1.0.1** CHAT Action Type | Track conversational/cognitive work |
+| **v1.0.1** whoami Endpoint | GET /api/whoami for agent self-awareness |
 
 ## API Reference
 
