@@ -180,3 +180,4 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 *.bak
+acp_data.json

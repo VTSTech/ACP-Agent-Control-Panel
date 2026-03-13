@@ -159,7 +159,7 @@ The complete session state is stored in a single JSON file:
 ```typescript
 interface Activity {
   id: string;              // "HHMMSS-abc123" format
-  action: ActionType;      // READ | WRITE | EDIT | BASH | TODO | SKILL | API | SEARCH
+  action: ActionType;      // READ | WRITE | EDIT | BASH | TODO | SKILL | API | SEARCH | CHAT
   target: string;          // File path, command, or resource identifier
   details: string;         // Human-readable description
   status: ActivityStatus;  // running | completed | error | cancelled
@@ -210,6 +210,31 @@ Arbitrary key-value pairs for attaching custom context:
 | `SKILL` | Invoking skills (VLM, TTS, etc.) | `image-generation` |
 | `API` | External API calls | `POST https://api.example.com` |
 | `SEARCH` | Web search, grep, find operations | `search query` |
+| `CHAT` | Conversational/informational exchanges | `discussion topic or question` |
+
+### 3.3.1 CHAT Action Type
+
+The `CHAT` action type captures token usage from conversational and cognitive work that doesn't involve tool execution:
+
+**When to use:**
+- Q&A exchanges
+- Reasoning and analysis discussions
+- Planning sessions
+- Knowledge transfer
+- Specification review
+- Decision discussions
+
+**Example:**
+```json
+POST /api/action {
+  "action": "CHAT",
+  "target": "AgentSkill specification review",
+  "details": "Discussed skill format, discovered missing CHAT type for token tracking"
+}
+```
+
+**Why it matters:**
+Pure conversational exchanges consume context window tokens but were previously untracked. The CHAT type ensures accurate token accounting for all agent activity, including cognitive work without tool execution.
 
 ### 3.4 TODO Object
 
@@ -1142,13 +1167,16 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 ## Appendix B: Changelog
 
 ### v1.0.1 (Current)
+- **NEW**: `CHAT` action type for conversational/informational exchanges
 - **NEW**: `content_size` parameter for `/api/start`, `/api/complete`, `/api/action`
 - **NEW**: `complete_content_size` parameter for `/api/action` (combined endpoint)
 - **NEW**: Activity `priority` field (`high` | `medium` | `low`)
 - **NEW**: Activity `metadata` field for arbitrary key-value pairs
 - **NEW**: `GET /api/activity/{id}` endpoint for single activity lookup
 - **NEW**: Activity Hints - contextual information returned in `/api/action` response
+- **DOC**: Added §3.3.1 CHAT Action Type section
 - **FIX**: Accurate token tracking for agents using native Read/Write/Edit tools
+- **FIX**: Token tracking now captures cognitive work without tool execution
 - **DOC**: Added §3.2.1 Priority Levels section
 - **DOC**: Added §3.2.2 Metadata section
 - **DOC**: Added §8.4 Native Tool Token Tracking section

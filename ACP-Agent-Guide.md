@@ -54,6 +54,7 @@ POST /api/action {
 | `API` | External API calls | Request + response |
 | `SEARCH` | Web search, grep, find | Query + results |
 | `TODO` | TODO state changes | Minimal |
+| `CHAT` | Conversational exchanges, Q&A, planning | Input tokens |
 
 ### Activity Priority (v1.0.1)
 
