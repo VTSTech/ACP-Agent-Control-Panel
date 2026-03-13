@@ -116,9 +116,9 @@ Agent Action Flow:
             │
             ▼
      ┌──────────────┐
-     │ LOG ACTION   │─────► POST /api/start
-     └──────┬───────┘       Returns: activity_id
-            │
+     │ LOG ACTION   │─────► POST /api/action (recommended)
+     └──────┬───────┘       OR POST /api/start
+            │               Returns: activity_id, hints
             ▼
      ┌──────────────┐
      │ DO ACTION    │─────► Execute Read/Write/Edit/Bash/etc.
@@ -127,7 +127,11 @@ Agent Action Flow:
             ▼
      ┌──────────────┐
      │ LOG COMPLETE │─────► POST /api/complete
-     └──────────────┘       {activity_id, result}
+     └──────────────┘       OR include in next POST /api/action
+                            {activity_id, result}
+
+Note: POST /api/action is the recommended combined endpoint that can
+complete previous activity AND start new one in a single request.
 ```
 
 ---
@@ -558,6 +562,11 @@ Trigger STOP ALL - cancels all running activities.
 }
 ```
 
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `reason` | string | No | Human-readable reason for stop (default: "User requested") |
+
 #### POST /api/resume
 
 Clear stop flag and resume operations.
@@ -590,6 +599,14 @@ Replace entire TODO list.
 }
 ```
 
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `todos` | array | Yes | Array of TODO objects to replace entire list |
+| `todos[].content` | string | Yes | Task description |
+| `todos[].status` | string | No | `pending`, `in_progress`, or `completed` (default: `pending`) |
+| `todos[].priority` | string | No | `high`, `medium`, or `low` (default: `medium`) |
+
 #### POST /api/todos/add
 
 Add single TODO item.
@@ -604,6 +621,13 @@ Add single TODO item.
   }
 }
 ```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `todo.content` | string | Yes | Task description |
+| `todo.status` | string | No | `pending`, `in_progress`, or `completed` (default: `pending`) |
+| `todo.priority` | string | No | `high`, `medium`, or `low` (default: `medium`) |
 
 #### POST /api/todos/clear
 
@@ -628,6 +652,13 @@ Add shell command to history.
 }
 ```
 
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `command` | string | Yes | Command executed (max 500 chars) |
+| `status` | string | No | `running`, `completed`, or `error` (default: `completed`) |
+| `output_preview` | string | No | Output snippet (max 200 chars) |
+
 #### POST /api/shell/clear
 
 Clear shell history.
@@ -647,7 +678,7 @@ Get condensed session summary for context recovery.
       "duration": "15m 30s",
       "duration_seconds": 930,
       "total_activities": 42,
-      "activity_breakdown": {"READ": 25, "EDIT": 10, "BASH": 7},
+      "activity_breakdown": {"READ": 25, "EDIT": 10, "BASH": 7, "CHAT": 5},
       "currently_running": 0,
       "stop_flag": false,
       "stop_reason": null
@@ -690,6 +721,13 @@ Add note for context recovery.
   "importance": "high"
 }
 ```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `category` | string | No | Note category (default: `context`) |
+| `content` | string | Yes | Note content (max 500 chars) |
+| `importance` | string | No | `normal` or `high` (default: `normal`) |
 
 **Categories:**
 - `decision`: Important decisions made
@@ -769,6 +807,12 @@ Save edited file.
 }
 ```
 
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Relative path to file |
+| `content` | string | Yes | File content to save |
+
 #### POST /api/files/delete
 
 Delete file or directory.
@@ -779,6 +823,11 @@ Delete file or directory.
   "path": "path/to/delete"
 }
 ```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Relative path to file or directory to delete |
 
 #### POST /api/files/mkdir
 
@@ -792,6 +841,12 @@ Create directory.
 }
 ```
 
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Parent directory path |
+| `name` | string | Yes | New directory name |
+
 #### POST /api/files/extract
 
 Extract archive.
@@ -802,6 +857,11 @@ Extract archive.
   "path": "path/to/archive.zip"
 }
 ```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Relative path to archive file |
 
 **Supported formats:** `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.gz`, `.bz2`
 
@@ -817,6 +877,13 @@ Create zip archive.
   "items": ["file1.py", "file2.py", "subdir/"]
 }
 ```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Base directory path |
+| `name` | string | Yes | Archive filename (should end in `.zip`) |
+| `items` | array | Yes | List of files/directories to include |
 
 ### 4.8 System Endpoints
 
@@ -1234,6 +1301,8 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 - **FIX**: Token tracking now captures cognitive work without tool execution
 - **FIX**: File upload CSRF token missing (drag-drop and button upload)
 - **DOC**: Added parameter tables to API endpoint documentation
+- **DOC**: Updated architecture diagram to show `/api/action` as recommended endpoint
+- **DOC**: Added CHAT to `activity_breakdown` example in `/api/summary` response
 
 ### v1.0.0
 - Initial specification release
