@@ -1,6 +1,6 @@
 # ACP Agent Quick Reference
 
-**Version:** Draft 1.0.2 | **Spec:** See [ACP-Specification.md](https://github.com/VTSTech/ACP-Agent-Control-Panel/blob/main/ACP-Specification.md) for full details
+**Version:** 1.0.3 | **Spec:** See [ACP-Specification.md](https://github.com/VTSTech/ACP-Agent-Control-Panel/blob/main/ACP-Specification.md) for full details
 
 ---
 
@@ -488,6 +488,23 @@ POST /api/resume
 | `/api/complete` + `content_size` | **v1.0.1** Native tool writes (chars / 3.5) |
 | `/api/files/view` | File content tokens (deduplicated per session) |
 
+### File Deduplication (v1.0.3)
+
+**READ activities with `content_size` automatically deduplicate** tokens for files already read:
+
+```bash
+# First read of file.py
+POST /api/action {"action": "READ", "target": "/file.py", "content_size": 10000}
+→ tokens_in: 2861 (includes content)
+
+# Second read of same file
+POST /api/action {"action": "READ", "target": "/file.py", "content_size": 10000}
+→ tokens_in: 4 (minimal - content NOT counted again)
+→ activity.tokens_deduplicated: true
+```
+
+**Why it matters:** Re-reading files won't inflate your token count. Session reset clears deduplication tracking.
+
 ### Native Tool Tracking (v1.0.1)
 
 When using native Read/Write/Edit tools, include `content_size` for accurate tracking:
@@ -852,4 +869,54 @@ POST /api/action {"action": "EDIT", "target": "/file.py"}
 
 ---
 
-*ACP Agent Guide - Draft 1.0.2*
+*ACP Agent Guide v1.0.3*
+
+---
+
+## APPENDIX: v1.0.3 FEATURES
+
+### Duration Statistics
+
+```bash
+GET /api/stats/duration
+→ {
+    "stats": {
+      "by_action": {
+        "READ": {"count": 15, "average_ms": 3000, "average_str": "3.00s"},
+        "WRITE": {...}
+      },
+      "slow_activities": [{"action": "READ", "duration_str": "45.0s"}],
+      "average_duration_ms": 4800,
+      "trend": [{"action": "READ", "duration_ms": 3000}]
+    }
+  }
+```
+
+**Use cases:** Find slow operations, track performance trends, identify bottlenecks.
+
+### Batch Operations
+
+```bash
+POST /api/activity/batch {"operations": [
+  {"type": "start", "action": "READ", "target": "/file1.py"},
+  {"type": "start", "action": "READ", "target": "/file2.py"},
+  {"type": "complete", "activity_id": "prev-id", "result": "Done"}
+]}
+→ {"success": true, "results": [...], "count": 3}
+```
+
+**Limits:** Max 50 operations per batch.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  NEW IN v1.0.3                                               │
+├─────────────────────────────────────────────────────────────┤
+│  • File Deduplication: READ auto-skips tokens for re-reads   │
+│  • tokens_deduplicated field in activity                     │
+│  • GET /api/stats/duration - Performance analysis            │
+│  • Slow activity detection (>30s threshold)                  │
+│  • POST /api/activity/batch - Bulk operations                │
+│  • Max 50 operations per batch                               │
+│  • Performance trend tracking (last 20 activities)           │
+└─────────────────────────────────────────────────────────────┘
+```

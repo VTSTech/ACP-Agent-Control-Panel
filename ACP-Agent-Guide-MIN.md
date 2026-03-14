@@ -1,6 +1,6 @@
 # ACP Agent Quick Reference
 
-**Version:** 1.0.2 | **Spec:** [ACP-Specification.md](https://github.com/VTSTech/ACP-Agent-Control-Panel/blob/main/ACP-Specification.md)
+**Version:** 1.0.3 | **Spec:** [ACP-Specification.md](https://github.com/VTSTech/ACP-Agent-Control-Panel/blob/main/ACP-Specification.md)
 
 ---
 
@@ -115,6 +115,8 @@ POST /api/action {"action": "READ", "target": "file.py", "content_size": 35000}
 POST /api/complete {"activity_id": "...", "result": "...", "content_size": 5000}
 ```
 
+**File deduplication** (v1.0.3): READ activities auto-deduplicate files already read.
+
 **Per-agent tracking** (v1.0.2): First agent = primary, owns `session_tokens`. Others tracked in `agent_tokens{}`.
 
 ---
@@ -142,6 +144,29 @@ Check `orphan_warning` in response. If present, complete orphan tasks first:
 ```bash
 POST /api/complete {"activity_id": "orphan_id", "result": "Completed late"}
 ```
+
+---
+
+## DURATION STATS (v1.0.3)
+
+```bash
+GET /api/stats/duration    # Performance analysis by action type
+```
+
+Returns: avg duration per action, slow activities (>30s), trends.
+
+---
+
+## BATCH OPERATIONS (v1.0.3)
+
+```bash
+POST /api/activity/batch {"operations": [
+  {"type": "start", "action": "READ", "target": "file1.py"},
+  {"type": "start", "action": "READ", "target": "file2.py"},
+  {"type": "complete", "activity_id": "prev-id", "result": "Done"}
+]}
+```
+Max 50 operations per batch.
 
 ---
 
@@ -210,8 +235,9 @@ POST /api/todos/update {"todos": [{"id": "1", "content": "Task", "status": "comp
 - [ ] Complete activity when done
 - [ ] Sync TODOs on change
 - [ ] Check `nudge` and `orphan_warning` in responses
+- [ ] Use batch ops for multiple activities (v1.0.3)
 - [ ] Save notes before compression
 
 ---
 
-*ACP Agent Guide v1.0.2*
+*ACP Agent Guide v1.0.3*
