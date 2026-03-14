@@ -39,6 +39,7 @@ ACP solves the observability problem for AI agents by providing:
 - **TODO Management**: Task tracking for agents
 - **Shell History**: Terminal command logging
 - **File Management**: Integrated file browser for workspace access
+- **Remote Access**: Built-in cloudflared tunnel for public access (v1.0.3)
 
 ### 1.2 Design Principles
 
@@ -395,6 +396,7 @@ Check stop flag and token usage.
     "LocalClaw": 500
   },
   "other_agents_tokens": 500,
+  "tunnel_url": "https://xxx.trycloudflare.com",
   "session": { "<SessionInfo>" }
 }
 ```
@@ -410,6 +412,7 @@ The first agent to log an activity becomes the "primary agent" and owns the main
 | `agent_tokens` | Object mapping agent names to their token usage |
 | `other_agents_tokens` | Sum of tokens from non-primary agents |
 | `session_tokens` | Only reflects primary agent's context consumption |
+| `tunnel_url` | **v1.0.3** Active cloudflared tunnel URL, or `null` if not active |
 
 **Why it matters:** Subagents and other agents won't pollute the primary agent's context window estimation, providing accurate tracking for the main session.
 
@@ -436,7 +439,8 @@ Convenience endpoint that returns status, running, history, and tokens in one ca
   "session_tokens": 45000,
   "context_window": 200000,
   "tokens_remaining": 155000,
-  "tokens_percent": 22.5
+  "tokens_percent": 22.5,
+  "tunnel_url": "https://xxx.trycloudflare.com"
 }
 ```
 
@@ -1624,6 +1628,8 @@ Context recovery allows AI agents to restore session state after:
 | `GLMACP_CONTEXT_WINDOW` | `200000` | LLM context window size |
 | `GLMACP_MAX_UPLOAD_SIZE` | `104857600` | Max upload size (100MB) |
 | `GLMACP_MAX_FILE_VIEW_SIZE` | `10485760` | Max file view size (10MB) |
+| `GLMACP_TUNNEL` | `false` | Auto-start cloudflared tunnel (v1.0.3) |
+| `GLMACP_TUNNEL_URL` | *(none)* | Reuse existing tunnel URL (v1.0.3) |
 
 ### 8.2 Constants
 
@@ -1724,6 +1730,53 @@ POST /api/action {
 }
 ```
 
+### 8.6 Remote Access via Cloudflared Tunnel (v1.0.3)
+
+ACP can automatically start a cloudflared tunnel for public internet access, eliminating the need to run tunnel and ACP as separate processes.
+
+**Configuration:**
+
+| Variable | Value | Description |
+|----------|-------|-------------|
+| `GLMACP_TUNNEL` | `auto` | Auto-start cloudflared tunnel on server startup |
+| `GLMACP_TUNNEL_URL` | *(optional)* | Reuse an existing tunnel URL instead of creating new |
+
+**Usage:**
+
+```bash
+# Single command - ACP manages cloudflared as child process
+GLMACP_TUNNEL=auto python3 VTSTech-GLMACP.py
+```
+
+**Output:**
+```
+🤖 Agent Control Panel R6-v1.0.3 starting on port 8766
+   Auth: admin / secret
+   Features: Activity Monitor + File Manager + System Stats + Theme Toggle
+   🌐 Tunnel: https://xxx-xxx-xxx.trycloudflare.com
+```
+
+**API Response:**
+
+The `tunnel_url` field is included in `/api/status` and `/api/all` responses:
+
+```json
+{
+  "success": true,
+  "tunnel_url": "https://xxx-xxx-xxx.trycloudflare.com",
+  ...
+}
+```
+
+**Process Management:**
+- Cloudflared runs as a child process of ACP
+- Automatic cleanup on server shutdown (Ctrl+C or `/api/shutdown`)
+- Tunnel URL persists in API responses for agent/agent skill integration
+
+**Requirements:**
+- `cloudflared` binary installed in PATH or `~/.local/bin/`
+- Internet connectivity for tunnel establishment
+
 ---
 
 ## 9. Implementation Guide
@@ -1780,11 +1833,17 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 - **NEW**: Duration stats by action type, slow activity detection, performance trends
 - **NEW**: `POST /api/activity/batch` - process multiple activity operations in single request
 - **NEW**: Batch `start` and `complete` operations for efficiency
+- **NEW**: Built-in cloudflared tunnel support - auto-start with `GLMACP_TUNNEL=auto`
+- **NEW**: `tunnel_url` field in `/api/status` and `/api/all` responses
+- **NEW**: Per-agent token tracking - `primary_agent`, `agent_tokens`, `other_agents_tokens` fields
 - **DOC**: Added `model_name` to Standard Metadata Fields table (§3.2.2)
 - **DOC**: Added §4.8 Duration Statistics API section
 - **DOC**: Added §4.9 Batch Operations API section
+- **DOC**: Added §8.6 Remote Access via Cloudflared Tunnel section
 - **DOC**: Updated token tracking to document deduplication behavior
+- **DOC**: Documented `GLMACP_TUNNEL` and `GLMACP_TUNNEL_URL` environment variables
 - **UI**: GLMACP renderActivity() displays `agent_name · model_name` format
+- **UI**: Tunnel status display in sidebar with copy URL button
 
 ### v1.0.2
 - **NEW**: Synchronous Nudge API - human guidance delivered on next `/api/action` call
