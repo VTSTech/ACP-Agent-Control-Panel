@@ -332,6 +332,27 @@ POST /api/complete {
 | `pip install`, `make build`, `docker run` | ACP communication is monitoring overhead |
 | Any actual work command | |
 
+### Pipelines with ACP Calls
+
+When a command pipeline mixes ACP calls with processing, split them:
+
+**Don't:**
+```bash
+curl localhost:8766/api/history | python3 -c "import json; ..."  # Mixed - unclear what to log
+```
+
+**Do:**
+```bash
+# Step 1: ACP call (don't log)
+curl localhost:8766/api/history > /tmp/data.json
+
+# Step 2: Process data (LOG THIS)
+python3 -c "import json; d=json.load(open('/tmp/data.json')); print(len(d['history']))"
+# → POST /api/shell/add {"command": "python3 -c ...", "status": "completed", ...}
+```
+
+**Why split?** Separating ACP calls from work makes Terminal history cleaner and shows actual agent activity.
+
 ### Workflow
 
 ```

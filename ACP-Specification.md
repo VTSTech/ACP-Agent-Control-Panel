@@ -1484,6 +1484,25 @@ POST /api/shell/add {
 POST /api/complete {"activity_id": "...", "result": "Installed dependencies"}
 ```
 
+#### Pipelines with ACP Calls
+
+When a command pipeline mixes ACP calls with processing, split them:
+
+**Don't:**
+```bash
+curl localhost:8766/api/history | python3 -c "import json; ..."  # Whole pipeline - unclear what to log
+```
+
+**Do:**
+```bash
+# Split into separate commands
+curl localhost:8766/api/history > /tmp/data.json    # ACP call (don't log)
+python3 -c "import json; ..." /tmp/data.json         # Processing (LOG THIS)
+POST /api/shell/add {"command": "python3 -c ...", "status": "completed", "output_preview": "..."}
+```
+
+**Why split?** Separating ACP calls from work makes Terminal history cleaner and shows actual agent activity, not monitoring overhead.
+
 ### 5.4 TODO Synchronization (MANDATORY)
 
 **TODO state must be synchronized with ACP.**

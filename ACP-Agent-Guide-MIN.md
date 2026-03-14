@@ -98,6 +98,16 @@ POST /api/shell/add {"command": "...", "status": "completed|error", "output_prev
 | `pip install`, `make build`, `docker run` | ACP communication is monitoring overhead |
 | Any actual work command | |
 
+**Pipelines:** Split ACP calls from processing:
+```bash
+# Don't: curl localhost:8766/api/x | python3 -c "..."  (mixed pipeline)
+
+# Do: Split and log the work part
+curl localhost:8766/api/x > /tmp/data.json      # ACP (don't log)
+python3 -c "import json; ..." /tmp/data.json     # Work (LOG THIS)
+POST /api/shell/add {"command": "python3 -c ...", ...}
+```
+
 ---
 
 ## TODO SYNC
