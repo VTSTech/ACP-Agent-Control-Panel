@@ -1448,7 +1448,15 @@ This single request:
 
 ### 5.3 Shell Command Logging (MANDATORY)
 
-**All shell/terminal commands MUST be logged to ACP.**
+**All shell/terminal commands MUST be logged to ACP, EXCEPT ACP API calls.**
+
+| Log These | Don't Log |
+|-----------|-----------|
+| `git clone`, `npm install`, `ls`, `python script.py` | `curl ... localhost:8766/api/...` (ACP calls) |
+| `pip install`, `make build`, `docker run` | ACP communication is monitoring overhead |
+| Any actual work command | |
+
+**Why the exception?** ACP API calls (curl to localhost:8766) are the monitoring mechanism itself. Logging them would create recursive noise without value - they're not "work" being done, they're the reporting of work.
 
 When running BASH commands, log to both Activity Monitor AND Shell History:
 
