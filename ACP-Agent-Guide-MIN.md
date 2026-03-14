@@ -84,11 +84,19 @@ If `stop_flag: true`: STOP immediately, inform user, wait for resume.
 
 ---
 
-## SHELL LOGGING
+## SHELL LOGGING (MANDATORY)
+
+**Log ALL shell/terminal commands EXCEPT ACP API calls.**
 
 ```bash
 POST /api/shell/add {"command": "...", "status": "completed|error", "output_preview": "first 200 chars"}
 ```
+
+| Log These | Don't Log |
+|-----------|-----------|
+| `git clone`, `npm install`, `ls`, `python script.py` | `curl ... localhost:8766/api/...` (ACP calls) |
+| `pip install`, `make build`, `docker run` | ACP communication is monitoring overhead |
+| Any actual work command | |
 
 ---
 
@@ -173,8 +181,15 @@ Max 50 operations per batch.
 ## METADATA (v1.0.1)
 
 ```bash
-POST /api/action {"action": "READ", "target": "file.py", "priority": "high|medium|low", "metadata": {"agent_name": "Super Z"}}
+POST /api/action {"action": "READ", "target": "file.py", "priority": "high|medium|low", "metadata": {"agent_name": "Super Z", "model_name": "gpt-4o"}}
 ```
+
+| Field | Description |
+|-------|-------------|
+| `agent_name` | Agent/subagent name (e.g., "Super Z", "LocalClaw") |
+| `model_name` | Model identifier (v1.0.3) (e.g., "qwen2.5-coder:0.5b-instruct-q4_k_m") |
+| `source` | Origin (e.g., "user_request", "auto", "subagent") |
+| `skill` | Skill invoked for SKILL actions |
 
 ---
 
@@ -230,8 +245,8 @@ POST /api/todos/update {"todos": [{"id": "1", "content": "Task", "status": "comp
 - [ ] Check status before starting
 - [ ] Log action BEFORE executing
 - [ ] Include `content_size` for native tools
-- [ ] Include `agent_name` in metadata
-- [ ] Log shell commands AFTER executing
+- [ ] Include `agent_name` and `model_name` in metadata
+- [ ] Log shell commands to `/api/shell/add` (except ACP calls)
 - [ ] Complete activity when done
 - [ ] Sync TODOs on change
 - [ ] Check `nudge` and `orphan_warning` in responses
