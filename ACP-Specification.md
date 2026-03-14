@@ -226,12 +226,29 @@ Arbitrary key-value pairs for attaching custom context:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| `agent_name` | Name of the agent/subagent performing the action | `"Super Z"`, `"full-stack-developer"` |
+| `agent_name` | Name of the agent/subagent performing the action | `"Super Z"`, `"LocalClaw"` |
+| `model_name` | **v1.0.3** Model identifier used by the agent | `"qwen2.5-coder:0.5b-instruct-q4_k_m"`, `"gpt-4o"` |
 | `source` | Origin of the action | `"user_request"`, `"auto"`, `"subagent"` |
 | `tool_name` | Native tool used | `"Read"`, `"Write"`, `"Edit"`, `"Bash"` |
 | `skill` | Skill invoked (for SKILL actions) | `"image-generation"`, `"VLM"` |
 
 The `agent_name` field is particularly important for multi-agent scenarios where multiple agents or subagents may work on the same session.
+
+The `model_name` field separates the agent identity from the model it's using. This enables:
+- Clean UI display: `LocalClaw · qwen2.5-coder:0.5b-instruct-q4_k_m`
+- Filtering activities by model
+- Tracking model usage across sessions
+
+**Example with model_name:**
+```json
+{
+  "metadata": {
+    "agent_name": "LocalClaw",
+    "model_name": "qwen2.5-coder:0.5b-instruct-q4_k_m",
+    "source": "user_request"
+  }
+}
+```
 
 ### 3.3 Action Types
 
@@ -1728,6 +1745,7 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 ## Appendix B: Changelog
 
 ### v1.0.3 (Current)
+- **NEW**: `model_name` metadata field - separates agent identity from model identifier for clean UI display
 - **NEW**: File Deduplication - READ activities track files already read, avoiding token double-counting
 - **NEW**: `tokens_deduplicated` field in activity - indicates if tokens were skipped due to previous read
 - **NEW**: `files_read_tokens` session data - tracks which files have been counted
@@ -1735,9 +1753,11 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 - **NEW**: Duration stats by action type, slow activity detection, performance trends
 - **NEW**: `POST /api/activity/batch` - process multiple activity operations in single request
 - **NEW**: Batch `start` and `complete` operations for efficiency
+- **DOC**: Added `model_name` to Standard Metadata Fields table (§3.2.2)
 - **DOC**: Added §4.8 Duration Statistics API section
 - **DOC**: Added §4.9 Batch Operations API section
 - **DOC**: Updated token tracking to document deduplication behavior
+- **UI**: GLMACP renderActivity() displays `agent_name · model_name` format
 
 ### v1.0.2
 - **NEW**: Synchronous Nudge API - human guidance delivered on next `/api/action` call
