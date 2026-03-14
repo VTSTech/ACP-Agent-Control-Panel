@@ -191,7 +191,8 @@ requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
 ## Documentation
 
 - **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.2)
-- **[ACP-Agent-Guide.md](./ACP-Agent-Guide.md)** - Quick integration guide for agents (v1.0.2)
+- **[ACP-Agent-Guide-MIN.md](./ACP-Agent-Guide-MIN.md)** - Quick reference for AI agents (v1.0.2)
+- **[ACP-Agent-Guide-MAX.md](./ACP-Agent-Guide-MAX.md)** - Complete integration guide with examples (v1.0.2)
 
 ## Screenshots
 
