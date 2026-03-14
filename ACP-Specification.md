@@ -1,6 +1,6 @@
 # Agent Control Panel (ACP) Specification
 
-**Version:** 1.0.2  
+**Version:** 1.0.3  
 **Status:** Draft  
 **Authors:** VTSTech, Community Contributors
 
@@ -1054,7 +1054,124 @@ Create zip archive.
 | `name` | string | Yes | Archive filename (should end in `.zip`) |
 | `items` | array | Yes | List of files/directories to include |
 
-### 4.8 System Endpoints
+### 4.8 Duration Statistics API (v1.0.3)
+
+#### GET /api/stats/duration
+
+Get activity duration statistics for performance analysis.
+
+**Response:**
+```json
+{
+  "success": true,
+  "stats": {
+    "by_action": {
+      "READ": {
+        "count": 15,
+        "total_ms": 45000,
+        "average_ms": 3000,
+        "average_str": "3.00s",
+        "min_ms": 500,
+        "max_ms": 10000
+      },
+      "WRITE": {...}
+    },
+    "slow_activities": [
+      {
+        "id": "143052-abc123",
+        "action": "READ",
+        "target": "/large/file.py",
+        "duration_ms": 45000,
+        "duration_str": "45.0s"
+      }
+    ],
+    "total_duration_ms": 120000,
+    "activities_with_duration": 25,
+    "average_duration_ms": 4800,
+    "slow_threshold_ms": 30000,
+    "trend": [
+      {"action": "READ", "duration_ms": 3000, "timestamp": "2025-03-14T16:00:00"},
+      {...}
+    ]
+  },
+  "slow_threshold_seconds": 30.0
+}
+```
+
+**Fields:**
+| Field | Description |
+|-------|-------------|
+| `by_action` | Duration statistics grouped by action type |
+| `slow_activities` | List of activities exceeding 30 second threshold (max 10) |
+| `total_duration_ms` | Sum of all activity durations |
+| `activities_with_duration` | Count of activities with recorded duration |
+| `average_duration_ms` | Overall average duration |
+| `slow_threshold_ms` | Threshold for slow activity detection (30000ms) |
+| `trend` | Last 20 activity durations for trend analysis |
+
+**Use cases:**
+- Identify performance bottlenecks
+- Find slow operations for optimization
+- Track activity duration trends over session
+
+### 4.9 Batch Operations API (v1.0.3)
+
+#### POST /api/activity/batch
+
+Process multiple activity operations in a single atomic request.
+
+**Request:**
+```json
+{
+  "operations": [
+    {"type": "start", "action": "READ", "target": "/file1.py", "content_size": 5000},
+    {"type": "start", "action": "READ", "target": "/file2.py", "content_size": 3000},
+    {"type": "complete", "activity_id": "prev-id-1", "result": "Completed"},
+    {"type": "complete", "activity_id": "prev-id-2", "result": "Done"}
+  ]
+}
+```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `operations` | array | Yes | Array of operations (max 50) |
+| `operations[].type` | string | Yes | Operation type: `start` or `complete` |
+| `operations[].action` | string | Conditional | Action type (required for `start`) |
+| `operations[].target` | string | No | Target for `start` operations |
+| `operations[].activity_id` | string | Conditional | Activity ID (required for `complete`) |
+| `operations[].result` | string | No | Result for `complete` operations |
+| `operations[].content_size` | integer | No | Content size for token tracking |
+| `operations[].metadata` | object | No | Metadata for activity |
+
+**Response:**
+```json
+{
+  "success": true,
+  "results": [
+    {"success": true, "operation": "start", "activity_id": "143100-abc123"},
+    {"success": true, "operation": "start", "activity_id": "143100-def456"},
+    {"success": true, "operation": "complete", "activity_id": "prev-id-1"},
+    {"success": true, "operation": "complete", "activity_id": "prev-id-2"}
+  ],
+  "count": 4,
+  "session_tokens": 45500,
+  "context_window": 200000,
+  "tokens_remaining": 154500
+}
+```
+
+**Error handling:**
+- If any operation fails, `success` is `false`, but all operations are attempted
+- Each result includes `success` and `error` fields
+- Maximum 50 operations per batch
+
+**Use cases:**
+- Log multiple file reads in one request
+- Complete multiple activities atomically
+- Reduce API overhead for bulk operations
+
+### 4.10 System Endpoints
 
 #### GET /api/system
 
@@ -1149,7 +1266,7 @@ Self-awareness endpoint for AI agents. Returns identity context to help agents u
    POST /api/action {"metadata": {"agent_name": "Super Z", ...}}
 ```
 
-### 4.9 Nudge API (v1.0.2)
+### 4.11 Nudge API (v1.0.2)
 
 Synchronous nudges allow humans to provide mid-task guidance. Unlike WebSockets, nudges are delivered synchronously on the agent's next `/api/action` call.
 
@@ -1495,7 +1612,42 @@ This is tuned for mixed code/prose content and provides a conservative estimate.
 | `/api/complete` + `content_size` | **v1.0.1** Output tokens from native tool writes | Character count / 3.5 |
 | `/api/files/view` | File content tokens | Deduplicated per session |
 
-### 8.4 Native Tool Token Tracking (v1.0.1)
+### 8.4 File Deduplication (v1.0.3)
+
+**READ activities with `content_size` automatically deduplicate tokens** for files already read in the session. This prevents token inflation when agents re-read the same file multiple times.
+
+**How it works:**
+1. First READ of a file: Tokens counted normally, file path tracked in `files_read_tokens`
+2. Subsequent READs of same file: `tokens_deduplicated: true`, content_size NOT counted again
+3. Only counts minimal tokens (~4-5) for action/target strings
+
+**Example:**
+```json
+// First read of /project/main.py
+POST /api/action {
+  "action": "READ",
+  "target": "/project/main.py",
+  "content_size": 10000
+}
+→ activity.tokens_in: 2861 (includes content)
+→ activity.tokens_deduplicated: false
+
+// Second read of same file
+POST /api/action {
+  "action": "READ",
+  "target": "/project/main.py",
+  "content_size": 10000
+}
+→ activity.tokens_in: 4 (minimal - content NOT counted)
+→ activity.tokens_deduplicated: true
+```
+
+**Benefits:**
+- Accurate token tracking for context window management
+- Prevents token inflation from repeated file reads
+- Session reset clears deduplication tracking
+
+### 8.5 Native Tool Token Tracking (v1.0.1)
 
 When agents use native tools (Read, Write, Edit) instead of ACP's `/api/files/*` endpoints, token tracking is not automatic. To ensure accurate tracking, include the `content_size` parameter:
 
@@ -1575,7 +1727,19 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 
 ## Appendix B: Changelog
 
-### v1.0.2 (Current)
+### v1.0.3 (Current)
+- **NEW**: File Deduplication - READ activities track files already read, avoiding token double-counting
+- **NEW**: `tokens_deduplicated` field in activity - indicates if tokens were skipped due to previous read
+- **NEW**: `files_read_tokens` session data - tracks which files have been counted
+- **NEW**: `GET /api/stats/duration` - activity duration statistics for performance analysis
+- **NEW**: Duration stats by action type, slow activity detection, performance trends
+- **NEW**: `POST /api/activity/batch` - process multiple activity operations in single request
+- **NEW**: Batch `start` and `complete` operations for efficiency
+- **DOC**: Added §4.8 Duration Statistics API section
+- **DOC**: Added §4.9 Batch Operations API section
+- **DOC**: Updated token tracking to document deduplication behavior
+
+### v1.0.2
 - **NEW**: Synchronous Nudge API - human guidance delivered on next `/api/action` call
 - **NEW**: `POST /api/nudge` - Create mid-task guidance message
 - **NEW**: `GET /api/nudge` - Check pending nudge status
