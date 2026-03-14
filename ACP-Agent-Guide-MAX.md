@@ -291,7 +291,8 @@ POST /api/complete {
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| `agent_name` | Name of agent/subagent | `"Super Z"`, `"full-stack-developer"` |
+| `agent_name` | Name of agent/subagent | `"Super Z"`, `"LocalClaw"` |
+| `model_name` | **v1.0.3** Model identifier | `"qwen2.5-coder:0.5b-instruct-q4_k_m"`, `"gpt-4o"` |
 | `source` | Origin of action | `"user_request"`, `"auto"`, `"subagent"` |
 | `tool_name` | Native tool used | `"Read"`, `"Write"`, `"Bash"` |
 | `skill` | Skill invoked (SKILL actions) | `"image-generation"` |
@@ -323,7 +324,13 @@ POST /api/complete {
 
 ## SHELL LOGGING (MANDATORY)
 
-**Every shell/terminal command MUST be logged to ACP.**
+**Log ALL shell/terminal commands EXCEPT ACP API calls.**
+
+| Log These | Don't Log |
+|-----------|-----------|
+| `git clone`, `npm install`, `ls`, `python script.py` | `curl ... localhost:8766/api/...` (ACP calls) |
+| `pip install`, `make build`, `docker run` | ACP communication is monitoring overhead |
+| Any actual work command | |
 
 ### Workflow
 
@@ -682,7 +689,7 @@ GET /api/csrf-token
 │  □ Check status before starting (GET /api/status)           │
 │  □ Log action BEFORE executing (POST /api/action)           │
 │  □ Include content_size for native tools (v1.0.1)           │
-│  □ Include agent_name in metadata for attribution           │
+│  □ Include agent_name and model_name in metadata            │
 │  □ Log shell commands AFTER executing (POST /api/shell/add) │
 │  □ Complete activity when done (POST /api/complete)         │
 │  □ Sync TODOs on change (POST /api/todos/update)            │
@@ -911,6 +918,7 @@ POST /api/activity/batch {"operations": [
 ┌─────────────────────────────────────────────────────────────┐
 │  NEW IN v1.0.3                                               │
 ├─────────────────────────────────────────────────────────────┤
+│  • model_name metadata field - separate agent from model     │
 │  • File Deduplication: READ auto-skips tokens for re-reads   │
 │  • tokens_deduplicated field in activity                     │
 │  • GET /api/stats/duration - Performance analysis            │
@@ -918,5 +926,6 @@ POST /api/activity/batch {"operations": [
 │  • POST /api/activity/batch - Bulk operations                │
 │  • Max 50 operations per batch                               │
 │  • Performance trend tracking (last 20 activities)           │
+│  • Shell logging exception: don't log ACP API calls          │
 └─────────────────────────────────────────────────────────────┘
 ```
