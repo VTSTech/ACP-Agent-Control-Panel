@@ -64,6 +64,9 @@ The full implementation includes everything in minimal plus:
 | **v1.0.2** TODO/Shell Metadata | `agent_name`, `tool`, `skill` attribution |
 | **v1.0.2** Per-Agent Tokens | `primary_agent`, `agent_tokens{}` for context isolation |
 | **v1.0.2** Context Isolation | Session tokens reflect only primary agent context |
+| **v1.0.3** File Deduplication | READ skips tokens for already-read files |
+| **v1.0.3** Duration Statistics | GET /api/stats/duration for performance analysis |
+| **v1.0.3** Batch Operations | POST /api/activity/batch for bulk activities |
 
 ## API Reference
 
@@ -83,6 +86,8 @@ The full implementation includes everything in minimal plus:
 | POST | `/api/nudge` | **v1.0.2** Send guidance to agent |
 | GET | `/api/nudge` | **v1.0.2** Check pending nudge |
 | POST | `/api/nudge/ack` | **v1.0.2** Acknowledge nudge |
+| GET | `/api/stats/duration` | **v1.0.3** Activity duration statistics |
+| POST | `/api/activity/batch` | **v1.0.3** Batch activity operations |
 
 ### Extended Endpoints (Full Version)
 
@@ -190,9 +195,9 @@ requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
 
 ## Documentation
 
-- **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.2)
-- **[ACP-Agent-Guide-MIN.md](./ACP-Agent-Guide-MIN.md)** - Quick reference for AI agents (v1.0.2)
-- **[ACP-Agent-Guide-MAX.md](./ACP-Agent-Guide-MAX.md)** - Complete integration guide with examples (v1.0.2)
+- **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.3)
+- **[ACP-Agent-Guide-MIN.md](./ACP-Agent-Guide-MIN.md)** - Quick reference for AI agents (v1.0.3)
+- **[ACP-Agent-Guide-MAX.md](./ACP-Agent-Guide-MAX.md)** - Complete integration guide with examples (v1.0.3)
 
 ## Screenshots
 
