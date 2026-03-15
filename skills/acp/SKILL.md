@@ -16,12 +16,12 @@ argument-hint: "No arguments needed - just invoke to bootstrap ACP workflow"
 
 | Scenario | Bootstrap Required |
 |----------|-------------------|
-| Session start | ✅ MANDATORY |
-| Context resume | ✅ MANDATORY |
-| Context reset | ✅ MANDATORY |
-| New agent joining session | ✅ MANDATORY |
-| Subagent spawn | ✅ MANDATORY |
-| LocalClaw connecting | ✅ MANDATORY |
+| Session start | [x] MANDATORY |
+| Context resume | [x] MANDATORY |
+| Context reset | [x] MANDATORY |
+| New agent joining session | [x] MANDATORY |
+| Subagent spawn | [x] MANDATORY |
+| LocalClaw connecting | [x] MANDATORY |
 
 **Bootstrap is NOT optional.** An agent that skips bootstrap:
 - Will not have their token usage tracked correctly
@@ -128,9 +128,9 @@ GET /api/notes    # Recover saved notes
 ## THE ACP PATTERN (MEMORIZE)
 
 ```
-LOG ? EXECUTE ? COMPLETE
-/api/action ? Tool ? /api/complete
-BEFORE ? NOW ? AFTER
+LOG → EXECUTE → COMPLETE
+/api/action → Tool → /api/complete
+BEFORE → NOW → AFTER
 ```
 
 **NEVER execute before logging.**
@@ -143,7 +143,7 @@ BEFORE ? NOW ? AFTER
 
 ```bash
 POST /api/action {"action": "READ|WRITE|EDIT|BASH|SEARCH", "target": "...", "details": "...", "metadata": {"agent_name": "Super Z"}}
-? {activity_id, stop_flag, session_tokens, hints?, nudge?, orphan_warning?}
+→ {activity_id, stop_flag, session_tokens, hints?, nudge?, orphan_warning?}
 ```
 
 **After execution:**
@@ -245,11 +245,11 @@ The `hints` field in `/api/action` responses provides contextual information:
 
 ```
 IF stop_flag: true
-  ? STOP immediately
-  ? Inform user
-  ? Wait for resume
-  ? DO NOT start new activities
-  ? DO NOT spawn subagents
+  → STOP immediately
+  → Inform user
+  → Wait for resume
+  → DO NOT start new activities
+  → DO NOT spawn subagents
 ```
 
 ---
@@ -449,7 +449,7 @@ Combined status, running, and history in one call:
 
 ```bash
 GET /api/all
-? {
+→ {
   "success": true,
   "stop_flag": false,
   "running": [...],
@@ -466,7 +466,7 @@ List currently running activities:
 
 ```bash
 GET /api/running
-? {"success": true, "running": [...]}
+→ {"success": true, "running": [...]}
 ```
 
 ### GET /api/activity/{id}
@@ -475,7 +475,7 @@ Get single activity by ID (v1.0.1):
 
 ```bash
 GET /api/activity/143052-a1b2c3
-? {
+→ {
   "success": true,
   "activity": {
     "id": "143052-a1b2c3",
