@@ -549,53 +549,83 @@ _UI = """<!DOCTYPE html>
             ? '<div class="orphan-banner"><strong>&#x26A0;&#xFE0F; ORPHAN WARNING:</strong> '+d.orphan_warning.count+' activit'+(d.orphan_warning.count===1?'y':'ies')+' running > 5min</div>'
             : '';
 
+        // Helper: update a panel container in-place to avoid re-triggering animations
+        // and losing scroll position. If the panel doesn't exist yet it is created
+        // (animation fires once, correctly). If it already exists only the title
+        // and body innerHTML are swapped while scrollTop is preserved.
+        function patchPanel(container, title, bodyHTML, bodyStyle) {
+            const existing = container.querySelector('.panel');
+            if (!existing) {
+                const style = bodyStyle ? ' style="'+bodyStyle+'"' : '';
+                container.innerHTML = '<div class="panel"><div class="panel-header"><span class="panel-title">'+title+'</span></div><div class="panel-body"'+style+'>'+bodyHTML+'</div></div>';
+                return;
+            }
+            existing.querySelector('.panel-title').innerHTML = title;
+            const pb = existing.querySelector('.panel-body');
+            if (bodyStyle) pb.setAttribute('style', bodyStyle);
+            const saved = pb.scrollTop;
+            pb.innerHTML = bodyHTML;
+            pb.scrollTop = saved;
+        }
+
         // Running
         const rs = document.getElementById('running-section');
-        rs.innerHTML = d.running&&d.running.length ? '<div class="panel"><div class="panel-header"><span class="panel-title">&#x1F504; Running ('+d.running.length+')</span></div><div class="panel-body">'
-            + d.running.map(a => {
+        if (d.running && d.running.length) {
+            const runBody = d.running.map(a => {
                 const m=a.metadata||{};
                 return '<div class="activity-item"><div class="activity-header"><span class="status-pill status-running">'+a.status+'</span><strong>'+esc(a.action)+'</strong><span class="tag">#'+a.id+'</span></div>'
                     +'<div class="activity-body"><div class="activity-target">'+esc(a.target||'N/A')+'</div><div>'+esc(a.details||'')+'</div></div>'
                     +'<div class="panel-footer"><span>&#x1F464; '+esc(m.agent_name||'---')+(m.model_name?' &middot; '+esc(m.model_name):'')+'</span><span>&#x1F552; '+esc(a.started||'---')+'</span></div></div>';
-            }).join('') + '</div></div>' : '';
+            }).join('');
+            patchPanel(rs, '&#x1F504; Running ('+d.running.length+')', runBody, '');
+        } else {
+            rs.innerHTML = '';
+        }
 
         // History
         const hs = document.getElementById('history-section');
-        hs.innerHTML = d.history&&d.history.length ? '<div class="panel"><div class="panel-header"><span class="panel-title">&#x1F4DC; History ('+d.history.length+')</span></div><div class="panel-body">'
-            + d.history.slice(0,25).map(a => {
+        if (d.history && d.history.length) {
+            const histBody = d.history.slice(0,25).map(a => {
                 const m=a.metadata||{};
                 const sc = a.status==='error'||a.status==='cancelled'?'error':'completed';
                 return '<div class="activity-item"><div class="activity-header"><span class="status-pill status-'+sc+'">'+a.status+'</span><strong>'+esc(a.action)+'</strong><span class="tag">#'+a.id+'</span></div>'
                     +'<div class="activity-body"><div class="activity-target">'+esc(a.target||'N/A')+'</div><div>'+esc(a.details||'')+'</div>'+(a.result?'<pre>'+esc(a.result)+'</pre>':'')+'</div>'
                     +'<div class="panel-footer"><span>&#x1F464; '+esc(m.agent_name||'---')+(m.model_name?' &middot; '+esc(m.model_name):'')+'</span><span>&#x1F552; '+esc(a.started||'---')+'</span><span>&#x23F1;&#xFE0F; '+dur(a.duration_ms)+'</span></div></div>';
-            }).join('') + '</div></div>'
-            : '<div style="text-align:center;padding:40px;color:#6e7681">No activity logged yet.</div>';
+            }).join('');
+            patchPanel(hs, '&#x1F4DC; History ('+d.history.length+')', histBody, '');
+        } else {
+            hs.innerHTML = '<div style="text-align:center;padding:40px;color:#6e7681">No activity logged yet.</div>';
+        }
 
         // Todos
         const tp = document.getElementById('todos-panel');
-        tp.innerHTML = d.todos&&d.todos.length ? '<div class="panel"><div class="panel-header"><span class="panel-title">&#x1F4CB; Todos ('+d.todos.length+')</span></div><div class="panel-body" style="padding:0">'
-            + d.todos.map(t => '<div class="todo-item"><input type="checkbox" class="todo-checkbox" data-id="'+t.id+'" '+(t.status==='completed'?'checked':'')+' onchange="toggleTodo(event.target.dataset.id)"><span class="todo-content" style="'+(t.status==='completed'?'text-decoration:line-through;opacity:0.6':'')+'">'+esc(t.content)+'</span><span class="todo-priority priority-'+(t.priority||'medium')+'">'+(t.priority||'med')+'</span></div>').join('')
-            + '</div></div>' : '';
+        if (d.todos && d.todos.length) {
+            const todoBody = d.todos.map(t => '<div class="todo-item"><input type="checkbox" class="todo-checkbox" data-id="'+t.id+'" '+(t.status==='completed'?'checked':'')+' onchange="toggleTodo(event.target.dataset.id)"><span class="todo-content" style="'+(t.status==='completed'?'text-decoration:line-through;opacity:0.6':'')+'">'+esc(t.content)+'</span><span class="todo-priority priority-'+(t.priority||'medium')+'">'+(t.priority||'med')+'</span></div>').join('');
+            patchPanel(tp, '&#x1F4CB; Todos ('+d.todos.length+')', todoBody, 'padding:0');
+        } else { tp.innerHTML = ''; }
 
         // Agents — primary_agent gets orange star badge
         const ap = document.getElementById('agents-panel');
-        ap.innerHTML = d.agent_tokens&&Object.keys(d.agent_tokens).length ? '<div class="panel"><div class="panel-header"><span class="panel-title">&#x1F916; Agents</span></div><div class="panel-body">'
-            + Object.entries(d.agent_tokens).map(([n,tok]) => '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)"><span class="agent-badge '+(n===d.primary_agent?'agent-primary':'agent-other')+'">'+esc(n)+(n===d.primary_agent?' &#x2605;':'')+'</span><span class="tag">'+tok+' tok</span></div>').join('')
-            + '</div></div>' : '';
+        if (d.agent_tokens && Object.keys(d.agent_tokens).length) {
+            const agentBody = Object.entries(d.agent_tokens).map(([n,tok]) => '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)"><span class="agent-badge '+(n===d.primary_agent?'agent-primary':'agent-other')+'">'+esc(n)+(n===d.primary_agent?' &#x2605;':'')+'</span><span class="tag">'+tok+' tok</span></div>').join('');
+            patchPanel(ap, '&#x1F916; Agents', agentBody, '');
+        } else { ap.innerHTML = ''; }
 
         // Shell
         const sp = document.getElementById('shell-panel');
-        sp.innerHTML = d.shell_log&&d.shell_log.length ? '<div class="panel"><div class="panel-header"><span class="panel-title">&#x1F4BB; Shell ('+d.shell_log.length+')</span></div><div class="panel-body" style="padding:0">'
-            + d.shell_log.slice(0,10).map(s => '<div class="shell-item"><span class="shell-cmd" title="'+esc(s.command||'')+'">'+esc(s.command||'---')+'</span><span class="shell-status '+(s.status==='error'?'status-error':'status-completed')+'">'+s.status+'</span></div>').join('')
-            + '</div></div>' : '';
+        if (d.shell_log && d.shell_log.length) {
+            const shellBody = d.shell_log.slice(0,10).map(s => '<div class="shell-item"><span class="shell-cmd" title="'+esc(s.command||'')+'">'+esc(s.command||'---')+'</span><span class="shell-status '+(s.status==='error'?'status-error':'status-completed')+'">'+s.status+'</span></div>').join('');
+            patchPanel(sp, '&#x1F4BB; Shell ('+d.shell_log.length+')', shellBody, 'padding:0');
+        } else { sp.innerHTML = ''; }
 
         // Hints
         const hp = document.getElementById('hints-panel');
-        hp.innerHTML = d.hints&&(d.hints.loop_detected||d.hints.active_todos>0) ? '<div class="panel"><div class="panel-header"><span class="panel-title">&#x1F4A1; Hints</span></div><div class="panel-body">'
-            + (d.hints.loop_detected?'<div style="color:var(--warning);margin-bottom:8px">&#x26A0;&#xFE0F; Loop detected: '+d.hints.loop_count+' repetitions</div>':'')
-            + (d.hints.suggestion?'<div style="color:var(--info)">'+esc(d.hints.suggestion)+'</div>':'')
-            + (d.hints.active_todos>0?'<div class="tag">&#x1F4CC; '+d.hints.active_todos+' active todos</div>':'')
-            + '</div></div>' : '';
+        if (d.hints && (d.hints.loop_detected || d.hints.active_todos > 0)) {
+            const hintsBody = (d.hints.loop_detected?'<div style="color:var(--warning);margin-bottom:8px">&#x26A0;&#xFE0F; Loop detected: '+d.hints.loop_count+' repetitions</div>':'')
+                + (d.hints.suggestion?'<div style="color:var(--info)">'+esc(d.hints.suggestion)+'</div>':'')
+                + (d.hints.active_todos>0?'<div class="tag">&#x1F4CC; '+d.hints.active_todos+' active todos</div>':'');
+            patchPanel(hp, '&#x1F4A1; Hints', hintsBody, '');
+        } else { hp.innerHTML = ''; }
     }
 
     setInterval(() => {
