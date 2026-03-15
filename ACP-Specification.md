@@ -1389,10 +1389,22 @@ POST /api/action {"action": "READ", "target": "file.py"}
 
 All agents using ACP **MUST**:
 
-1. **Log every action** via `/api/action` BEFORE executing
-2. **Log every shell command** via `/api/shell/add` AFTER executing
-3. **Sync TODO state** via `/api/todos/update` when TODOs change
-4. **Check stop flag** before starting any new activity
+1. **Send bootstrap as FIRST message** - Every agent MUST log a bootstrap activity before any other ACP interaction
+2. **Log every action** via `/api/action` BEFORE executing
+3. **Log every shell command** via `/api/shell/add` AFTER executing
+4. **Sync TODO state** via `/api/todos/update` when TODOs change
+5. **Check stop flag** before starting any new activity
+
+**Bootstrap is MANDATORY for:**
+
+| Scenario | Bootstrap Required |
+|----------|-------------------|
+| Session start | ✅ MANDATORY |
+| Context resume | ✅ MANDATORY |
+| Context reset | ✅ MANDATORY |
+| New agent joining session | ✅ MANDATORY |
+| Subagent spawn | ✅ MANDATORY |
+| LocalClaw connecting | ✅ MANDATORY |
 
 Failure to follow these requirements results in incomplete activity tracking,
 inaccurate token estimation, and lost session history.
@@ -1406,11 +1418,14 @@ AI agents using ACP **MUST** follow this workflow:
 │                    ACP AGENT WORKFLOW                           │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  0. SESSION START (optional but recommended)                    │
-│     GET /api/whoami  →  Establish identity context             │
-│     GET /api/summary →  Recover previous session state         │
-│     GET /api/todos   →  Restore TODO list                      │
-│     Set agent_name in metadata for all activities              │
+│  0. BOOTSTRAP (MANDATORY - FIRST MESSAGE)                       │
+│     GET /api/status  →  Check if ACP is running                 │
+│     GET /api/whoami  →  Establish identity context              │
+│     POST /api/action →  Log bootstrap activity:                 │
+│       {"action": "CHAT", "target": "Session bootstrap",         │
+│        "details": "Establishing agent identity",                │
+│        "metadata": {"agent_name": "Super Z", "source": "bootstrap"}} │
+│     This makes you primary agent if first to connect            │
 │                                                                 │
 │  1. CHECK STATUS                                                │
 │     GET /api/status                                             │
