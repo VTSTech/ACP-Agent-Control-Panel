@@ -1,6 +1,6 @@
 # Agent Control Panel (ACP) Specification
 
-**Version:** 1.0.3  
+**Version:** 1.0.4  
 **Status:** Draft  
 **Authors:** VTSTech, Community Contributors
 
@@ -40,6 +40,8 @@ ACP solves the observability problem for AI agents by providing:
 - **Shell History**: Terminal command logging
 - **File Management**: Integrated file browser for workspace access
 - **Remote Access**: Built-in cloudflared tunnel for public access (v1.0.3)
+- **Agent Registry**: A2A agent discovery and presence tracking (v1.0.4)
+- **Inter-Agent Messaging**: Lightweight agent-to-agent communication (v1.0.4)
 
 ### 1.2 Design Principles
 
@@ -62,6 +64,8 @@ ACP solves the observability problem for AI agents by providing:
 | Context Recovery | ✅ | ❌ | ❌ | ⚠️ Limited |
 | File Manager | ✅ | ⚠️ Basic | ❌ | ❌ |
 | Shell History | ✅ | ❌ | ❌ | ❌ |
+| Agent Registry | ✅ | ❌ | ⚠️ Basic | ❌ |
+| Inter-Agent Messaging | ✅ | ❌ | ✅ | ❌ |
 | Transport | HTTP REST | JSON-RPC | JSON-RPC/gRPC | OTLP |
 
 ---
@@ -75,7 +79,7 @@ ACP solves the observability problem for AI agents by providing:
 │                        AI AGENT                                  │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │  1. CHECK STATUS (stop_flag?)                            │   │
-│  │  2. LOG ACTION (POST /api/start)                         │   │
+│  │  2. LOG ACTION (POST /api/action)                        │   │
 │  │  3. EXECUTE ACTION                                        │   │
 │  │  4. LOG COMPLETE (POST /api/complete)                    │   │
 │  └──────────────────────────────────────────────────────────┘   │
@@ -93,6 +97,10 @@ ACP solves the observability problem for AI agents by providing:
 │  │    TODO     │  │   Shell     │  │   Context   │             │
 │  │   Tracker   │  │   History   │  │   Recovery  │             │
 │  └─────────────┘  └─────────────┘  └─────────────┘             │
+│  ┌─────────────┐  ┌─────────────┐                               │
+│  │   A2A       │  │   Agent     │  (v1.0.4)                     │
+│  │  Messaging  │  │  Registry   │                               │
+│  └─────────────┘  └─────────────┘                               │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -119,7 +127,7 @@ Agent Action Flow:
      ┌──────────────┐
      │ LOG ACTION   │─────► POST /api/action (recommended)
      └──────┬───────┘       OR POST /api/start
-            │               Returns: activity_id, hints
+            │               Returns: activity_id, hints, a2a_hints
             ▼
      ┌──────────────┐
      │ DO ACTION    │─────► Execute Read/Write/Edit/Bash/etc.
@@ -165,7 +173,12 @@ The complete session state is stored in a single JSON file:
   "files_read_tokens": {
     "/path/to/file.py": 1500,
     "/path/to/config.json": 800
-  }
+  },
+  "agents": {
+    "Super Z": {"<Agent>", "..."},
+    "LocalClaw": {"<Agent>", "..."}
+  },
+  "a2a_messages": ["<A2AMessage>", "..."]
 }
 ```
 
@@ -177,12 +190,19 @@ The complete session state is stored in a single JSON file:
 | `agent_tokens` | Token usage breakdown per agent name |
 | `files_read_tokens` | Tracks files already counted for token deduplication |
 
+#### A2A Fields (v1.0.4)
+
+| Field | Description |
+|-------|-------------|
+| `agents` | Agent registry mapping agent names to Agent objects |
+| `a2a_messages` | Queue of inter-agent messages (newest first) |
+
 ### 3.2 Activity Object
 
 ```typescript
 interface Activity {
   id: string;              // "HHMMSS-abc123" format
-  action: ActionType;      // READ | WRITE | EDIT | BASH | TODO | SKILL | API | SEARCH | CHAT
+  action: ActionType;      // READ | WRITE | EDIT | BASH | TODO | SKILL | API | SEARCH | CHAT | A2A
   target: string;          // File path, command, or resource identifier
   details: string;         // Human-readable description
   status: ActivityStatus;  // running | completed | error | cancelled
@@ -264,6 +284,7 @@ The `model_name` field separates the agent identity from the model it's using. T
 | `API` | External API calls | `POST https://api.example.com` |
 | `SEARCH` | Web search, grep, find operations | `search query` |
 | `CHAT` | Conversational/informational exchanges | `discussion topic or question` |
+| `A2A` | **v1.0.4** Agent-to-agent communication | `AgentA → AgentB` |
 
 ### 3.3.1 CHAT Action Type
 
@@ -288,6 +309,28 @@ POST /api/action {
 
 **Why it matters:**
 Pure conversational exchanges consume context window tokens but were previously untracked. The CHAT type ensures accurate token accounting for all agent activity, including cognitive work without tool execution.
+
+### 3.3.2 A2A Action Type (v1.0.4)
+
+The `A2A` action type captures inter-agent communication events:
+
+**When logged:**
+- Automatically logged when using `/api/a2a/send`
+- Captures sender, recipient, and message type
+- Enables activity history tracking of agent interactions
+
+**Example Activity:**
+```json
+{
+  "id": "143052-abc123",
+  "action": "A2A",
+  "target": "Super Z → LocalClaw",
+  "details": "request: analyze_file",
+  "status": "completed",
+  "tokens_in": 0,
+  "tokens_out": 0
+}
+```
 
 ### 3.4 TODO Object
 
@@ -334,7 +377,64 @@ interface Note {
 }
 ```
 
-### 3.7 Storage Files
+### 3.7 Agent Object (v1.0.4)
+
+```typescript
+interface Agent {
+  name: string;              // Agent identifier
+  capabilities: string[];    // List of capabilities this agent has
+  model_name?: string;       // Model identifier (optional)
+  endpoint?: string;         // Remote endpoint URL (optional)
+  status: AgentStatus;       // online | offline
+  registered_at: string;     // ISO 8601 timestamp
+  last_seen: string;         // ISO 8601 timestamp
+  tokens_used: number;       // Total tokens consumed by this agent
+  online?: boolean;          // Computed: true if last_seen < 60s ago
+}
+```
+
+**Agent Status:**
+- `online`: Agent has been active within last 60 seconds
+- `offline`: Agent has not been active recently
+
+**Capabilities Examples:**
+- `["code-generation", "file-editing"]`
+- `["web-search", "api-integration"]`
+- `["image-analysis", "vlm"]`
+
+### 3.8 A2A Message Object (v1.0.4)
+
+```typescript
+interface A2AMessage {
+  id: string;                // "HHMMSS-abc123" format
+  from_agent: string;        // Sender agent name
+  to_agent: string;          // Recipient agent name
+  type: MessageType;         // request | response | notification
+  action?: string;           // Action to perform (for requests)
+  payload?: object;          // Message data/parameters
+  priority: Priority;        // normal | high | urgent
+  reply_to?: string;         // Message ID this is replying to
+  created_at: string;        // ISO 8601 timestamp
+  expires_at: string;        // ISO 8601 expiration timestamp
+  ttl: number;               // Time-to-live in seconds
+}
+```
+
+**Message Types:**
+| Type | Description | Use Case |
+|------|-------------|----------|
+| `request` | Request for action/response | Ask another agent to perform a task |
+| `response` | Response to a request | Reply to a previous request |
+| `notification` | One-way notification | Broadcast status, progress, or events |
+
+**Priority Levels:**
+| Priority | When to Use |
+|----------|-------------|
+| `normal` | Routine communication (default) |
+| `high` | Important but not blocking |
+| `urgent` | Requires immediate attention |
+
+### 3.9 Storage Files
 
 | File | Purpose | Persistence |
 |------|---------|-------------|
@@ -504,7 +604,19 @@ Start a new activity.
   "activity_id": "143052-a1b2c3",
   "session_tokens": 45100,
   "context_window": 200000,
-  "tokens_remaining": 154900
+  "tokens_remaining": 154900,
+  "hints": {
+    "modified_this_session": true,
+    "a2a": {
+      "pending_count": 2,
+      "senders": ["LocalClaw"],
+      "preview": {
+        "from": "LocalClaw",
+        "action": "file_analysis_complete",
+        "msg_id": "143000-xyz789"
+      }
+    }
+  }
 }
 ```
 
@@ -539,11 +651,28 @@ Complete an activity.
 | `content_size` | integer | No | **v1.0.1** Character count of content written/generated |
 | `metadata` | object | No | **v1.0.1** Additional metadata (merged with existing) |
 
+**Response:**
+```json
+{
+  "success": true,
+  "activity": {"<Activity>"},
+  "session_tokens": 45100,
+  "context_window": 200000,
+  "tokens_remaining": 154900,
+  "hints": {
+    "a2a": {
+      "pending_count": 1,
+      "senders": ["LocalClaw"]
+    }
+  }
+}
+```
+
 **Error Response:**
 ```json
 {
-  "activity_id": "143052-a1b2c3",
-  "error": "File not found"
+  "success": false,
+  "error": "Activity not found"
 }
 ```
 
@@ -601,7 +730,12 @@ Combined endpoint: complete previous + start new in one call.
     "modification_count": 3,
     "last_action": "EDIT",
     "related_todos": [{"id": "1", "content": "Fix bug in file.py", "status": "pending"}],
-    "active_todos": 2
+    "active_todos": 2,
+    "a2a": {
+      "pending_count": 2,
+      "senders": ["LocalClaw"],
+      "preview": {"from": "LocalClaw", "action": "analysis_done"}
+    }
   },
   "nudge": null,
   "orphan_warning": null
@@ -656,6 +790,44 @@ The `hints` field provides contextual information to help agents make better dec
 | `loop_count` | integer | Number of repetitions if loop detected |
 | `suggestion` | string | Actionable advice when patterns detected |
 | `active_todos` | integer | Count of in-progress TODOs |
+| `a2a` | object | **v1.0.4** A2A hints for pending messages |
+
+### A2A Hints (v1.0.4)
+
+When an agent includes `agent_name` in activity metadata, A2A hints are automatically included to notify about pending messages:
+
+```json
+{
+  "hints": {
+    "a2a": {
+      "pending_count": 3,
+      "senders": ["LocalClaw", "DataProcessor"],
+      "preview": {
+        "from": "LocalClaw",
+        "action": "file_analysis_complete",
+        "msg_id": "143000-xyz789"
+      }
+    }
+  }
+}
+```
+
+**A2A Hint Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `pending_count` | integer | Number of unread messages for this agent |
+| `senders` | array | Unique list of sender agent names |
+| `preview` | object | Preview of most recent message |
+
+**Agent workflow for A2A hints:**
+```
+1. Check hints.a2a in response
+2. If pending_count > 0:
+   a. GET /api/a2a/history?to=<my_agent_name> to retrieve messages
+   b. Process each message based on type and action
+   c. Send response if needed via POST /api/a2a/send
+3. Continue with task
+```
 
 #### POST /api/stop
 
@@ -727,19 +899,6 @@ The agent receives a special nudge with `type: "shutdown"`:
 }
 ```
 
-**Agent workflow for shutdown:**
-```
-1. Receive shutdown nudge on next /api/action call
-2. If requires_ack=true, call POST /api/nudge/ack
-3. Inform user that session is ending
-4. No further actions should be taken
-```
-
-**Use cases:**
-- Human wants to end a development session
-- Clean shutdown before context compression
-- Graceful termination of long-running tasks
-
 #### POST /api/clear_history
 
 Clear activity history.
@@ -747,6 +906,26 @@ Clear activity history.
 #### POST /api/reset_session
 
 Reset session to fresh state (tokens reset to startup value).
+
+#### POST /api/reset
+
+**v1.0.4** Full session reset - clears all state including agents and A2A messages.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Session reset complete",
+  "stats": {
+    "history_cleared": 50,
+    "shell_cleared": 20,
+    "todos_cleared": 5,
+    "agents_cleared": 3,
+    "a2a_cleared": 15,
+    "tokens_reset": 45000
+  }
+}
+```
 
 ### 4.4 TODO Endpoints
 
@@ -1381,6 +1560,306 @@ POST /api/action {"action": "READ", "target": "file.py"}
 3. Continue with task
 ```
 
+### 4.12 Agent Registry API (v1.0.4)
+
+The Agent Registry provides agent discovery and presence tracking for multi-agent environments.
+
+#### GET /api/agents
+
+List all registered agents.
+
+**Response:**
+```json
+{
+  "success": true,
+  "agents": [
+    {
+      "name": "Super Z",
+      "capabilities": ["code-generation", "file-editing", "web-development"],
+      "model_name": "gpt-4o",
+      "endpoint": null,
+      "status": "online",
+      "registered_at": "2025-03-14T10:00:00",
+      "last_seen": "2025-03-14T10:30:00",
+      "tokens_used": 42000,
+      "online": true
+    },
+    {
+      "name": "LocalClaw",
+      "capabilities": ["code-analysis", "file-reading"],
+      "model_name": "qwen2.5-coder:0.5b",
+      "endpoint": "http://localhost:8080",
+      "status": "online",
+      "registered_at": "2025-03-14T10:05:00",
+      "last_seen": "2025-03-14T10:29:30",
+      "tokens_used": 500,
+      "online": true
+    }
+  ],
+  "count": 2,
+  "primary_agent": "Super Z"
+}
+```
+
+**Fields:**
+| Field | Description |
+|-------|-------------|
+| `agents` | Array of registered agent objects |
+| `count` | Total number of registered agents |
+| `primary_agent` | Name of the primary agent (owns context) |
+
+#### GET /api/agents/{agent_name}
+
+Get a specific agent by name.
+
+**Response:**
+```json
+{
+  "success": true,
+  "agent": {
+    "name": "Super Z",
+    "capabilities": ["code-generation", "file-editing"],
+    "model_name": "gpt-4o",
+    "status": "online",
+    "registered_at": "2025-03-14T10:00:00",
+    "last_seen": "2025-03-14T10:30:00",
+    "tokens_used": 42000,
+    "online": true
+  }
+}
+```
+
+**Error Response:**
+```json
+{
+  "success": false,
+  "error": "Agent not found"
+}
+```
+
+#### POST /api/agents/register
+
+Register an agent with capabilities.
+
+**Request:**
+```json
+{
+  "agent_name": "LocalClaw",
+  "capabilities": ["code-analysis", "file-reading"],
+  "model_name": "qwen2.5-coder:0.5b",
+  "endpoint": "http://localhost:8080"
+}
+```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent_name` | string | Yes | Unique agent identifier |
+| `capabilities` | array | No | List of capability strings |
+| `model_name` | string | No | Model identifier |
+| `endpoint` | string | No | Remote endpoint URL (for remote agents) |
+
+**Response:**
+```json
+{
+  "success": true,
+  "agent": {
+    "name": "LocalClaw",
+    "capabilities": ["code-analysis", "file-reading"],
+    "model_name": "qwen2.5-coder:0.5b",
+    "endpoint": "http://localhost:8080",
+    "status": "online",
+    "registered_at": "2025-03-14T10:05:00",
+    "last_seen": "2025-03-14T10:05:00",
+    "tokens_used": 0
+  },
+  "message": "Agent 'LocalClaw' registered"
+}
+```
+
+#### POST /api/agents/unregister
+
+Unregister an agent.
+
+**Request:**
+```json
+{
+  "agent_name": "LocalClaw"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Agent 'LocalClaw' unregistered"
+}
+```
+
+**Error Response:**
+```json
+{
+  "success": false,
+  "error": "Agent not found"
+}
+```
+
+#### POST /api/agents/heartbeat
+
+Update agent's last_seen timestamp to indicate the agent is still active.
+
+**Request:**
+```json
+{
+  "agent_name": "LocalClaw"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true
+}
+```
+
+**When to use:**
+- Call periodically (every 30 seconds) to maintain online status
+- Agents are considered offline if last_seen > 60 seconds ago
+
+### 4.13 A2A Messaging API (v1.0.4)
+
+The A2A Messaging API enables lightweight inter-agent communication through a message queue pattern.
+
+#### POST /api/a2a/send
+
+Send a message to another agent.
+
+**Request:**
+```json
+{
+  "from_agent": "Super Z",
+  "to_agent": "LocalClaw",
+  "type": "request",
+  "action": "analyze_file",
+  "payload": {
+    "file_path": "/project/main.py",
+    "analysis_type": "complexity"
+  },
+  "priority": "high",
+  "ttl": 3600,
+  "reply_to": null
+}
+```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `from_agent` | string | Yes | Sender agent name |
+| `to_agent` | string | Yes | Recipient agent name |
+| `type` | string | No | Message type: `request`, `response`, `notification` (default: `notification`) |
+| `action` | string | No | Action identifier for requests |
+| `payload` | object | No | Message data/parameters |
+| `priority` | string | No | `normal`, `high`, `urgent` (default: `normal`) |
+| `ttl` | integer | No | Time-to-live in seconds (default: 3600) |
+| `reply_to` | string | No | Message ID this is replying to |
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": {
+    "id": "143052-abc123",
+    "from_agent": "Super Z",
+    "to_agent": "LocalClaw",
+    "type": "request",
+    "action": "analyze_file",
+    "payload": {
+      "file_path": "/project/main.py",
+      "analysis_type": "complexity"
+    },
+    "priority": "high",
+    "created_at": "2025-03-14T10:30:00",
+    "expires_at": "2025-03-14T11:30:00",
+    "ttl": 3600
+  }
+}
+```
+
+#### GET /api/a2a/history
+
+Get A2A message history.
+
+**Query Parameters:**
+| Parameter | Description |
+|-----------|-------------|
+| `from` | Filter by sender agent name |
+| `to` | Filter by recipient agent name |
+| `type` | Filter by message type |
+
+**Response:**
+```json
+{
+  "success": true,
+  "messages": [
+    {
+      "id": "143052-abc123",
+      "from_agent": "Super Z",
+      "to_agent": "LocalClaw",
+      "type": "request",
+      "action": "analyze_file",
+      "payload": {...},
+      "priority": "high",
+      "created_at": "2025-03-14T10:30:00",
+      "expires_at": "2025-03-14T11:30:00",
+      "ttl": 3600
+    }
+  ],
+  "count": 1
+}
+```
+
+**Example - Get messages sent to an agent:**
+```
+GET /api/a2a/history?to=LocalClaw
+```
+
+**Example - Get messages from a specific agent:**
+```
+GET /api/a2a/history?from=SuperZ
+```
+
+### A2A Message Flow Example
+
+```
+1. Agent registers:
+   POST /api/agents/register {"agent_name": "LocalClaw", "capabilities": [...]}
+
+2. Agent sends request:
+   POST /api/a2a/send {
+     "from_agent": "Super Z",
+     "to_agent": "LocalClaw",
+     "type": "request",
+     "action": "analyze_code",
+     "payload": {"file": "/project/app.py"}
+   }
+
+3. Recipient discovers message via A2A hints:
+   POST /api/action {"action": "READ", "target": "...", "metadata": {"agent_name": "LocalClaw"}}
+   → hints.a2a.pending_count = 1
+
+4. Recipient retrieves message:
+   GET /api/a2a/history?to=LocalClaw
+
+5. Recipient processes and responds:
+   POST /api/a2a/send {
+     "from_agent": "LocalClaw",
+     "to_agent": "Super Z",
+     "type": "response",
+     "reply_to": "143052-abc123",
+     "payload": {"complexity_score": 42, "issues": [...]}
+   }
+```
+
 ---
 
 ## 5. Agent Workflow
@@ -1390,10 +1869,12 @@ POST /api/action {"action": "READ", "target": "file.py"}
 All agents using ACP **MUST**:
 
 1. **Send bootstrap as FIRST message** - Every agent MUST log a bootstrap activity before any other ACP interaction
-2. **Log every action** via `/api/action` BEFORE executing
-3. **Log every shell command** via `/api/shell/add` AFTER executing
-4. **Sync TODO state** via `/api/todos/update` when TODOs change
-5. **Check stop flag** before starting any new activity
+2. **Register with Agent Registry** - Register agent name and capabilities (v1.0.4)
+3. **Log every action** via `/api/action` BEFORE executing
+4. **Log every shell command** via `/api/shell/add` AFTER executing
+5. **Sync TODO state** via `/api/todos/update` when TODOs change
+6. **Check stop flag** before starting any new activity
+7. **Check A2A hints** for pending inter-agent messages (v1.0.4)
 
 **Bootstrap is MANDATORY for:**
 
@@ -1421,6 +1902,7 @@ AI agents using ACP **MUST** follow this workflow:
 │  0. BOOTSTRAP (MANDATORY - FIRST MESSAGE)                       │
 │     GET /api/status  →  Check if ACP is running                 │
 │     GET /api/whoami  →  Establish identity context              │
+│     POST /api/agents/register → Register capabilities (v1.0.4)  │
 │     POST /api/action →  Log bootstrap activity:                 │
 │       {"action": "CHAT", "target": "Session bootstrap",         │
 │        "details": "Establishing agent identity",                │
@@ -1433,7 +1915,8 @@ AI agents using ACP **MUST** follow this workflow:
 │                                                                 │
 │  2. LOG ACTION FIRST (before doing it!)                         │
 │     POST /api/start {"action": "READ", "target": "/file.py"}   │
-│     Returns: {"activity_id": "HHMMSS-abc123"}                  │
+│     Returns: {"activity_id": "HHMMSS-abc123", "hints": {...}}  │
+│     Check hints.a2a for pending messages (v1.0.4)              │
 │                                                                 │
 │  3. NOW DO THE ACTION                                           │
 │     Perform Read, Write, Edit, Bash, Skill invocation, etc.    │
@@ -1441,6 +1924,10 @@ AI agents using ACP **MUST** follow this workflow:
 │  4. LOG COMPLETION                                              │
 │     POST /api/complete {"activity_id": "...", "result": "..."} │
 │     Or: {"activity_id": "...", "error": "error message"}       │
+│                                                                 │
+│  5. PERIODIC HEARTBEAT (v1.0.4)                                 │
+│     POST /api/agents/heartbeat {"agent_name": "..."}           │
+│     Call every 30 seconds to maintain online status            │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -1455,7 +1942,8 @@ POST /api/action {
   "result": "Previous action completed successfully",
   "action": "READ",
   "target": "/next/file.py",
-  "details": "Reading next file"
+  "details": "Reading next file",
+  "metadata": {"agent_name": "Super Z"}
 }
 ```
 
@@ -1464,6 +1952,7 @@ This single request:
 2. Completes previous activity
 3. Starts new activity
 4. Returns updated token counts
+5. Includes A2A hints for pending messages
 
 ### 5.3 Shell Command Logging (MANDATORY)
 
@@ -1503,25 +1992,6 @@ POST /api/shell/add {
 POST /api/complete {"activity_id": "...", "result": "Installed dependencies"}
 ```
 
-#### Pipelines with ACP Calls
-
-When a command pipeline mixes ACP calls with processing, split them:
-
-**Don't:**
-```bash
-curl localhost:8766/api/history | python3 -c "import json; ..."  # Whole pipeline - unclear what to log
-```
-
-**Do:**
-```bash
-# Split into separate commands
-curl localhost:8766/api/history > /tmp/data.json    # ACP call (don't log)
-python3 -c "import json; ..." /tmp/data.json         # Processing (LOG THIS)
-POST /api/shell/add {"command": "python3 -c ...", "status": "completed", "output_preview": "..."}
-```
-
-**Why split?** Separating ACP calls from work makes Terminal history cleaner and shows actual agent activity, not monitoring overhead.
-
 ### 5.4 TODO Synchronization (MANDATORY)
 
 **TODO state must be synchronized with ACP.**
@@ -1539,6 +2009,47 @@ POST /api/todos/update {"todos": [...]}  # Full sync
 **When Completing Task:**
 ```
 POST /api/action {"action": "TODO", "target": "task_id", "details": "Marked completed"}
+```
+
+### 5.5 A2A Communication Workflow (v1.0.4)
+
+**Sending a message:**
+```
+1. Identify target agent: GET /api/agents
+2. Send message: POST /api/a2a/send {"from_agent": "...", "to_agent": "...", ...}
+3. Message is queued and delivered via A2A hints
+```
+
+**Receiving messages:**
+```
+1. Include agent_name in activity metadata
+2. Check hints.a2a in response for pending_count
+3. If pending_count > 0: GET /api/a2a/history?to=<my_name>
+4. Process messages by type:
+   - request: Perform action, send response
+   - response: Handle response data
+   - notification: Acknowledge and proceed
+```
+
+**Example - Request/Response pattern:**
+```json
+// Agent A sends request
+POST /api/a2a/send {
+  "from_agent": "Coordinator",
+  "to_agent": "Analyzer",
+  "type": "request",
+  "action": "analyze_dependencies",
+  "payload": {"project_path": "/project"}
+}
+
+// Agent B receives via hints and responds
+POST /api/a2a/send {
+  "from_agent": "Analyzer",
+  "to_agent": "Coordinator",
+  "type": "response",
+  "reply_to": "original-msg-id",
+  "payload": {"dependencies": [...], "issues": [...]}
+}
 ```
 
 ---
@@ -1563,10 +2074,12 @@ Context recovery allows AI agents to restore session state after:
 │  1. Check for acp_session_summary.md in upload directory       │
 │  2. If found, read it for previous session context             │
 │  3. Call GET /api/summary for current session state            │
+│  4. Call GET /api/agents to see registered agents (v1.0.4)    │
 │                                                                 │
 │  DURING SESSION:                                                │
 │  - Save important notes: POST /api/notes/add                   │
 │  - Mark high importance for critical items                      │
+│  - Register with agent registry: POST /api/agents/register     │
 │                                                                 │
 │  BEFORE CONTEXT COMPRESSION:                                    │
 │  - POST /api/summary/export to create persistent summary       │
@@ -1643,8 +2156,8 @@ Context recovery allows AI agents to restore session state after:
 | `GLMACP_CONTEXT_WINDOW` | `200000` | LLM context window size |
 | `GLMACP_MAX_UPLOAD_SIZE` | `104857600` | Max upload size (100MB) |
 | `GLMACP_MAX_FILE_VIEW_SIZE` | `10485760` | Max file view size (10MB) |
-| `GLMACP_TUNNEL` | `false` | Auto-start cloudflared tunnel (v1.0.3) |
-| `GLMACP_TUNNEL_URL` | *(none)* | Reuse existing tunnel URL (v1.0.3) |
+| `GLMACP_TUNNEL` | `false` | **v1.0.3** Auto-start cloudflared tunnel (`auto`, `true`, `yes`) |
+| `GLMACP_TUNNEL_URL` | *(none)* | **v1.0.3** Reuse existing tunnel URL |
 
 ### 8.2 Constants
 
@@ -1654,6 +2167,7 @@ Context recovery allows AI agents to restore session state after:
 | `MAX_HISTORY` | `100` | Maximum activity history entries |
 | `MAX_NOTES` | `50` | Maximum AI notes |
 | `MAX_SHELL_HISTORY` | `50` | Maximum shell history entries |
+| `MAX_A2A_MESSAGES` | `100` | **v1.0.4** Maximum A2A messages in queue |
 
 ### 8.3 Token Estimation
 
@@ -1765,9 +2279,9 @@ GLMACP_TUNNEL=auto python3 VTSTech-GLMACP.py
 
 **Output:**
 ```
-🤖 Agent Control Panel R6-v1.0.3 starting on port 8766
+🤖 Agent Control Panel R7-A2A starting on port 8766
    Auth: admin / secret
-   Features: Activity Monitor + File Manager + System Stats + Theme Toggle
+   Features: Activity Monitor + File Manager + System Stats + Theme Toggle + A2A
    🌐 Tunnel: https://xxx-xxx-xxx.trycloudflare.com
 ```
 
@@ -1805,16 +2319,20 @@ A minimal ACP server requires:
 3. **File Access**: Browse workspace files
 4. **Token Estimation**: Track context usage
 5. **CSRF Protection**: Secure POST requests
+6. **Agent Registry**: Track multi-agent presence (v1.0.4)
+7. **A2A Messaging**: Inter-agent communication queue (v1.0.4)
 
 ### 9.2 Client Implementation
 
 AI agents should implement:
 
 1. **Status Check**: Call before each action
-2. **Action Logging**: Log before executing
-3. **Completion Logging**: Log after executing
-4. **Error Handling**: Handle stop requests gracefully
-5. **Context Recovery**: Save/load notes for session continuity
+2. **Agent Registration**: Register name and capabilities at startup (v1.0.4)
+3. **Action Logging**: Log before executing
+4. **Completion Logging**: Log after executing
+5. **Error Handling**: Handle stop requests gracefully
+6. **Context Recovery**: Save/load notes for session continuity
+7. **A2A Integration**: Check hints for pending messages (v1.0.4)
 
 ### 9.3 Reference Implementation
 
@@ -1830,7 +2348,7 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 | `400` | Bad Request (missing/invalid parameters) |
 | `401` | Unauthorized (authentication required/failed) |
 | `403` | Forbidden (invalid CSRF, stop requested) |
-| `404` | Not Found (activity, file, endpoint) |
+| `404` | Not Found (activity, file, endpoint, agent) |
 | `413` | Payload Too Large (file size limit exceeded) |
 | `429` | Too Many Requests (rate limited) |
 | `500` | Internal Server Error |
@@ -1839,7 +2357,34 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 
 ## Appendix B: Changelog
 
-### v1.0.3 (Current)
+### v1.0.4 (Current)
+- **NEW**: A2A Agent Registry API - agent discovery and presence tracking
+- **NEW**: `POST /api/agents/register` - Register agent with capabilities
+- **NEW**: `POST /api/agents/unregister` - Unregister an agent
+- **NEW**: `POST /api/agents/heartbeat` - Maintain online status
+- **NEW**: `GET /api/agents` - List all registered agents
+- **NEW**: `GET /api/agents/{name}` - Get specific agent details
+- **NEW**: A2A Messaging API - lightweight inter-agent communication
+- **NEW**: `POST /api/a2a/send` - Send message to another agent
+- **NEW**: `GET /api/a2a/history` - Get message history with filters
+- **NEW**: `A2A` action type for inter-agent communication logging
+- **NEW**: Agent Object in data model (name, capabilities, model_name, endpoint, status)
+- **NEW**: A2A Message Object in data model (from_agent, to_agent, type, action, payload)
+- **NEW**: A2A hints in activity response - notifies agents of pending messages
+- **NEW**: `agents` and `a2a_messages` fields in session state
+- **NEW**: `POST /api/reset` - Full session reset including agents and A2A messages
+- **NEW**: Agent online status computed from last_seen timestamp (< 60s = online)
+- **DOC**: Added §3.7 Agent Object section
+- **DOC**: Added §3.8 A2A Message Object section
+- **DOC**: Added §4.12 Agent Registry API section
+- **DOC**: Added §4.13 A2A Messaging API section
+- **DOC**: Added §5.5 A2A Communication Workflow section
+- **DOC**: Updated architecture diagram to show A2A components
+- **DOC**: Updated comparison table with Agent Registry and Inter-Agent Messaging
+- **UI**: GLMACP displays registered agents with online status
+- **UI**: A2A message indicator in activity responses
+
+### v1.0.3
 - **NEW**: `model_name` metadata field - separates agent identity from model identifier for clean UI display
 - **NEW**: File Deduplication - READ activities track files already read, avoiding token double-counting
 - **NEW**: `tokens_deduplicated` field in activity - indicates if tokens were skipped due to previous read
@@ -1869,7 +2414,7 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 - **NEW**: Nudge priority levels: `normal`, `high`, `urgent`
 - **NEW**: `requires_ack` option to block until acknowledged
 - **NEW**: `orphan_warning` field in `/api/action` response - alerts about orphan running tasks
-- **DOC**: Added §4.9 Nudge API section
+- **DOC**: Added §4.11 Nudge API section
 - **DOC**: Added Orphan Warning documentation in §4.3
 - **DOC**: Documented `GLMACP_DATA_FILE`, `GLMACP_FILES_DIR`, `GLMACP_SUMMARY_FILE`, `GLMACP_QUIET` environment variables
 - **FIX**: Corrected `/api/summary/export` HTTP method from POST to GET in documentation
