@@ -251,7 +251,8 @@ UI_HTML = """<!DOCTYPE html>
             <div class="stat-card"><span class="stat-label">Context</span><span id="stat-pc" class="stat-val">0%</span></div>
             <div class="stat-card"><span class="stat-label">Running</span><span id="stat-running" class="stat-val">0</span></div>
             <div class="stat-card"><span class="stat-label">Completed</span><span id="stat-completed" class="stat-val">0</span></div>
-            <div class="stat-card"><span class="stat-label">Primary Agent</span><span id="stat-agent" class="stat-val">---</span></div>
+            <div class="stat-card"><span class="stat-label">Primary Agent</span><span id="stat-primary-agent" class="stat-val">---</span></div>
+            <div class="stat-card"><span class="stat-label">Last Agent</span><span id="stat-last-agent" class="stat-val">---</span></div>
             <div class="stat-card"><span class="stat-label">Session</span><span id="stat-session" class="stat-val">0m</span></div>
             <div class="stat-card"><span class="stat-label">Todos</span><span id="stat-todos" class="stat-val">0</span></div>
             <div class="stat-card"><span class="stat-label">Errors</span><span id="stat-errors" class="stat-val">0</span></div>
@@ -336,7 +337,8 @@ UI_HTML = """<!DOCTYPE html>
             document.getElementById('stat-pc').className = 'stat-val' + (pct > 80 ? ' danger' : pct > 50 ? ' warn' : '');
             document.getElementById('stat-running').innerText = (d.running || []).length;
             document.getElementById('stat-completed').innerText = (d.history || []).length;
-            document.getElementById('stat-agent').innerText = d.last_agent || '---';
+            document.getElementById('stat-primary-agent').innerText = d.primary_agent || '---';
+            document.getElementById('stat-last-agent').innerText = d.last_agent || '---';
             document.getElementById('stat-session').innerText = formatSession(d.session?.elapsed_seconds || 0);
             document.getElementById('stat-todos').innerText = (d.todos || []).length;
             document.getElementById('stat-errors').innerText = (d.errors || []).length;
