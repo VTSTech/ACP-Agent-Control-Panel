@@ -16,12 +16,12 @@ argument-hint: "No arguments needed - just invoke to bootstrap ACP workflow"
 
 | Scenario | Bootstrap Required |
 |----------|-------------------|
-| Session start | [x] MANDATORY |
-| Context resume | [x] MANDATORY |
-| Context reset | [x] MANDATORY |
-| New agent joining session | [x] MANDATORY |
-| Subagent spawn | [x] MANDATORY |
-| LocalClaw connecting | [x] MANDATORY |
+| Session start | [✅] MANDATORY |
+| Context resume | [✅] MANDATORY |
+| Context reset | [✅] MANDATORY |
+| New agent joining session | [✅] MANDATORY |
+| Subagent spawn | [✅] MANDATORY |
+| LocalClaw connecting | [✅] MANDATORY |
 
 **Bootstrap is NOT optional.** An agent that skips bootstrap:
 - Will not have their token usage tracked correctly
