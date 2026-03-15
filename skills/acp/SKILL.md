@@ -1,10 +1,10 @@
 ---
 name: acp
-description: "ACP Agent Control Protocol - CRITICAL: Invoke this skill FIRST on every session start, context resume, or context reset. Required before any other work. Handles stop_flag, orphan detection, and workflow compliance."
+description: "ACP Agent Control Panel - CRITICAL: Invoke this skill FIRST on every session start, context resume, or context reset. Required before any other work. Handles stop_flag, orphan detection, and workflow compliance."
 argument-hint: "No arguments needed - just invoke to bootstrap ACP workflow"
 ---
 
-# ACP Agent Control Protocol
+# ACP Agent Control Panel
 
 **Version:** 1.0.3 | Single-file skill consolidating bootstrap and protocol reference.
 
@@ -16,12 +16,12 @@ argument-hint: "No arguments needed - just invoke to bootstrap ACP workflow"
 
 | Scenario | Bootstrap Required |
 |----------|-------------------|
-| Session start | ? MANDATORY |
-| Context resume | ? MANDATORY |
-| Context reset | ? MANDATORY |
-| New agent joining session | ? MANDATORY |
-| Subagent spawn | ? MANDATORY |
-| LocalClaw connecting | ? MANDATORY |
+| Session start | ✅ MANDATORY |
+| Context resume | ✅ MANDATORY |
+| Context reset | ✅ MANDATORY |
+| New agent joining session | ✅ MANDATORY |
+| Subagent spawn | ✅ MANDATORY |
+| LocalClaw connecting | ✅ MANDATORY |
 
 **Bootstrap is NOT optional.** An agent that skips bootstrap:
 - Will not have their token usage tracked correctly
