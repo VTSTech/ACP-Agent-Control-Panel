@@ -7,7 +7,7 @@ argument-hint: "No arguments needed - just invoke to bootstrap ACP workflow"
 # ACP Agent Control Panel
 
 **Version:** 1.0.3 | Single-file skill consolidating bootstrap and protocol reference.
-
+**ACP_URL** | Ask Human for this, use instead of http://localhost:8766/
 ---
 
 ## BOOTSTRAP SEQUENCE (MANDATORY)
