@@ -407,7 +407,7 @@ POST /api/complete {"activity_id": "...", "result": "...", "content_size": 5000}
 
 **File deduplication (v1.0.3):** READ activities auto-deduplicate files already read. Files in `files_read_tokens` are not double-counted.
 
-**Per-agent tracking (v1.0.2):** First agent = primary, owns `session_tokens`. Others tracked in `agent_tokens{}`.
+**Per-agent tracking (v1.0.3):** First agent = primary, owns `session_tokens`. Others tracked in `agent_tokens{}`.
 
 ```json
 {
@@ -467,6 +467,15 @@ List currently running activities:
 ```bash
 GET /api/running
 → {"success": true, "running": [...]}
+```
+
+### GET /api/history
+
+List completed activity history (most recent first):
+
+```bash
+GET /api/history
+→ {"success": true, "history": [...]}
 ```
 
 ### GET /api/activity/{id}
@@ -646,6 +655,7 @@ POST /api/todos/update {"todos": [...]}
 # Utility
 GET /api/all                    # Combined status + history
 GET /api/running                # Running activities
+GET /api/history                # Completed activity history
 GET /api/activity/{id}          # Single activity
 GET /api/stats/duration         # Duration statistics
 
@@ -656,14 +666,15 @@ POST /api/nudge/ack {}          # Acknowledge shutdown nudge
 
 ---
 
-## FILE LOCATIONS
+## STORAGE FILES
 
-| File | Purpose |
-|------|---------|
-| `/home/z/my-project/upload/VTSTech-GLMACP.py` | ACP server source |
-| `/home/z/my-project/upload/agent_activity.json` | Activity log export |
-| `/home/z/my-project/skills/acp/SKILL.md` | This skill (after bootstrap copy) |
-| `/home/z/my-project/ACP-Agent-Control-Panel/ACP-Specification.md` | Canonical specification |
+Per spec §3.7 — paths are relative to the server working directory unless overridden by env vars:
+
+| File | Purpose | Persistence |
+|------|---------|-------------|
+| `acp_data.json` | Session state storage (configurable via `ACP_DATA_FILE`) | Per-session |
+| `acp_session_summary.md` | Context recovery export (configurable via `ACP_SUMMARY_FILE`) | Survives restarts |
+| `ACP-Specification.md` | Canonical specification | Reference only |
 
 ---
 
