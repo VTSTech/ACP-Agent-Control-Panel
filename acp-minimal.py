@@ -3,6 +3,7 @@
 ACP Minimal v1.0.3 - Full Spec Compliance with Enhanced Visibility
 Endpoints: whoami, status, action, complete, nudge, nudge/ack, stop, reset, shutdown
            running, activity/{id}, stats/duration, todos, notes, shell, summary
+           files/list, files/view, files/download, files/stats (read-only)
 """
 
 import json, os, base64, time, signal, re
@@ -23,7 +24,7 @@ SESSION_START = time.time()
 def load_data():
     defaults = {
         "running":[], "history":[], "stop_flag":False, "tokens":0, 
-        "files_read":[], "nudge":None, "last_agent": "Unknown", "last_model": "Unknown",
+        "files_read":[], "nudge":None, "primary_agent": None, "last_agent": "Unknown", "last_model": "Unknown",
         "todos":[], "notes":"", "summary":"Session Reset.",
         "session_start": SESSION_START, "agent_tokens": {}, "activity_durations": {},
         "shell_log": [], "errors": []
@@ -138,6 +139,16 @@ def calc_duration_stats(data):
         "total_duration_ms": total_duration,
         "average_duration_ms": total_duration // max(1, count)
     }
+
+def format_duration(ms):
+    """Format milliseconds to human readable string"""
+    if not ms:
+        return "0ms"
+    if ms < 1000:
+        return f"{ms}ms"
+    if ms < 60000:
+        return f"{ms/1000:.1f}s"
+    return f"{ms/60000:.1f}m"
 
 # --- UI TEMPLATE ---
 UI_HTML = """<!DOCTYPE html>
@@ -535,7 +546,7 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             self.send_json({
                 "success": True, 
                 "version": "1.0.3", 
-                "capabilities": ["nudge", "notes", "todos", "shell", "add_routes", "hints", "duration_stats", "agent_tracking", "orphan_detection"],
+                "capabilities": ["nudge", "notes", "todos", "shell", "add_routes", "hints", "duration_stats", "agent_tracking", "orphan_detection", "files_readonly"],
                 "session": get_session_info()
             })
         
@@ -550,6 +561,7 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
                 "running": d["running"], 
                 "history": d["history"][:25], 
                 "nudge": d["nudge"],
+                "primary_agent": d.get("primary_agent"), 
                 "last_agent": d["last_agent"], 
                 "stop_flag": d["stop_flag"],
                 "todos": d.get("todos", []), 
@@ -565,6 +577,21 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             d = load_data()
             session = get_session_info()
             orphans = check_orphans(d)
+            
+            # Get current files in base directory
+            base_dir = os.environ.get("ACP_BASE_DIR", ".")
+            current_files = []
+            try:
+                for item in sorted(os.listdir(base_dir))[:20]:
+                    item_path = os.path.join(base_dir, item)
+                    current_files.append({
+                        "name": item,
+                        "is_dir": os.path.isdir(item_path),
+                        "size": os.path.getsize(item_path) if os.path.isfile(item_path) else 0
+                    })
+            except:
+                pass
+            
             self.send_json({
                 "success": True, 
                 "stop_flag": d["stop_flag"],
@@ -573,6 +600,7 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
                 "session_tokens": d["tokens"], 
                 "context_window": CONTEXT_WINDOW,
                 "tokens_remaining": CONTEXT_WINDOW - d["tokens"],
+                "primary_agent": d.get("primary_agent"),
                 "last_agent": d["last_agent"], 
                 "nudge": d["nudge"],
                 "session": session,
@@ -580,7 +608,9 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
                 "shell_log": d.get("shell_log", [])[-10:],
                 "agent_tokens": d.get("agent_tokens", {}),
                 "errors": d.get("errors", []),
-                "orphan_warning": {"count": len(orphans), "tasks": orphans} if orphans else None
+                "orphan_warning": {"count": len(orphans), "tasks": orphans} if orphans else None,
+                "current_files": current_files,
+                "base_dir": os.path.abspath(base_dir)
             })
         
         # running
@@ -642,6 +672,144 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             if d.get("notes"):
                 summary += f"\n## Notes\n{d['notes']}\n"
             self.send_json({"success": True, "summary": summary})
+
+        # ==================== READ-ONLY FILE MANAGER ====================
+        
+        # /api/files/list - List directory contents
+        elif self.path.startswith('/api/files/list'):
+            # Get path from query param or header
+            query_path = self.path.split('?', 1)[1] if '?' in self.path else ''
+            rel_path = query_path.replace('path=', '') if 'path=' in query_path else self.headers.get('X-Path', '')
+            rel_path = rel_path.strip('/')
+            
+            # Base directory is project root
+            base_dir = os.environ.get("ACP_BASE_DIR", ".")
+            full_path = os.path.join(base_dir, rel_path) if rel_path else base_dir
+            
+            # Security: prevent path traversal
+            if not os.path.abspath(full_path).startswith(os.path.abspath(base_dir)):
+                return self.send_json({"success": False, "error": "Access denied"}, 403)
+            
+            if not os.path.exists(full_path):
+                return self.send_json({"success": False, "error": "Path not found"}, 404)
+            
+            if not os.path.isdir(full_path):
+                return self.send_json({"success": False, "error": "Not a directory"}, 400)
+            
+            try:
+                items = []
+                for item in sorted(os.listdir(full_path)):
+                    item_path = os.path.join(full_path, item)
+                    stat = os.stat(item_path)
+                    items.append({
+                        "name": item,
+                        "is_dir": os.path.isdir(item_path),
+                        "size": stat.st_size if os.path.isfile(item_path) else 0,
+                        "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
+                    })
+                self.send_json({"success": True, "path": rel_path or "/", "items": items, "base_dir": base_dir})
+            except Exception as e:
+                self.send_json({"success": False, "error": str(e)}, 500)
+
+        # /api/files/view - View text file content
+        elif self.path.startswith('/api/files/view'):
+            query_path = self.path.split('?', 1)[1] if '?' in self.path else ''
+            rel_path = query_path.replace('path=', '') if 'path=' in query_path else self.headers.get('X-Path', '')
+            rel_path = rel_path.strip('/')
+            
+            base_dir = os.environ.get("ACP_BASE_DIR", ".")
+            full_path = os.path.join(base_dir, rel_path)
+            
+            # Security: prevent path traversal
+            if not os.path.abspath(full_path).startswith(os.path.abspath(base_dir)):
+                return self.send_json({"success": False, "error": "Access denied"}, 403)
+            
+            if not os.path.exists(full_path):
+                return self.send_json({"success": False, "error": "File not found"}, 404)
+            
+            if not os.path.isfile(full_path):
+                return self.send_json({"success": False, "error": "Not a file"}, 400)
+            
+            # Check file size (max 100KB for view)
+            if os.path.getsize(full_path) > 100000:
+                return self.send_json({"success": False, "error": "File too large for viewing (max 100KB)"}, 400)
+            
+            try:
+                with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read()
+                lines = content.count('\n') + 1
+                tokens = len(content) // 4  # rough estimate
+                self.send_json({
+                    "success": True, 
+                    "path": rel_path, 
+                    "content": content,
+                    "lines": lines,
+                    "size": len(content),
+                    "tokens": tokens
+                })
+            except Exception as e:
+                self.send_json({"success": False, "error": str(e)}, 500)
+
+        # /api/files/download - Download any file (binary safe)
+        elif self.path.startswith('/api/files/download'):
+            query_path = self.path.split('?', 1)[1] if '?' in self.path else ''
+            rel_path = query_path.replace('path=', '') if 'path=' in query_path else ''
+            rel_path = rel_path.strip('/')
+            
+            base_dir = os.environ.get("ACP_BASE_DIR", ".")
+            full_path = os.path.join(base_dir, rel_path)
+            
+            # Security: prevent path traversal
+            if not os.path.abspath(full_path).startswith(os.path.abspath(base_dir)):
+                self.send_response(403)
+                self.end_headers()
+                return
+            
+            if not os.path.exists(full_path) or not os.path.isfile(full_path):
+                self.send_response(404)
+                self.end_headers()
+                return
+            
+            try:
+                filename = os.path.basename(full_path)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/octet-stream')
+                self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+                self.end_headers()
+                with open(full_path, 'rb') as f:
+                    self.wfile.write(f.read())
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+
+        # /api/files/stats - Get file/directory statistics
+        elif self.path == '/api/files/stats':
+            base_dir = os.environ.get("ACP_BASE_DIR", ".")
+            
+            try:
+                total_files = 0
+                total_dirs = 0
+                total_size = 0
+                
+                for root, dirs, files in os.walk(base_dir):
+                    total_dirs += len(dirs)
+                    total_files += len(files)
+                    for f in files:
+                        try:
+                            total_size += os.path.getsize(os.path.join(root, f))
+                        except:
+                            pass
+                
+                self.send_json({
+                    "success": True,
+                    "base_dir": base_dir,
+                    "total_files": total_files,
+                    "total_directories": total_dirs,
+                    "total_size_bytes": total_size,
+                    "total_size_mb": round(total_size / (1024 * 1024), 2)
+                })
+            except Exception as e:
+                self.send_json({"success": False, "error": str(e)}, 500)
 
     def do_POST(self):
         if not self.check_auth(): return
@@ -705,6 +873,11 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             agent_name = meta.get('agent_name')
             
             if agent_name: 
+                # Set primary_agent ONCE - first agent wins
+                if not data.get("primary_agent") or data["primary_agent"] == "Unknown":
+                    data["primary_agent"] = agent_name
+                
+                # Always update last_agent (tracks most recent)
                 data["last_agent"] = agent_name
                 data["last_model"] = meta.get('model_name', data.get("last_model", "---"))
                 
@@ -713,7 +886,7 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
                     data["agent_tokens"] = {}
                 data["agent_tokens"][agent_name] = data["agent_tokens"].get(agent_name, 0) + max(1, estimate_tokens([req.get('action'), target], req.get('content_size', 0)))
             else:
-                meta['agent_name'] = data["last_agent"]
+                meta['agent_name'] = data.get("last_agent", "Unknown")
                 meta['model_name'] = data.get("last_model", "---")
 
             data["tokens"] += max(1, estimate_tokens([req.get('action'), target], req.get('content_size', 0)))
@@ -894,4 +1067,6 @@ if __name__ == "__main__":
     print(f"   Context Window: {CONTEXT_WINDOW:,} tokens")
     print(f"   Session Timeout: {SESSION_TIMEOUT}s")
     print(f"   Orphan Timeout: {ORPHAN_TIMEOUT}s")
+    print(f"   Base Directory: {os.environ.get('ACP_BASE_DIR', '.')}")
+    print(f"   File Endpoints: list, view, download, stats (read-only)")
     HTTPServer(('0.0.0.0', PORT), ACPMinimalHandler).serve_forever()
