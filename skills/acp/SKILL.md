@@ -1,10 +1,10 @@
 ---
 name: acp
-description: "ACP Agent Control Protocol - CRITICAL: Invoke this skill FIRST on every session start, context resume, or context reset. Required before any other work. Handles stop_flag, orphan detection, and workflow compliance."
+description: "ACP Agent Control Panel - CRITICAL: Invoke this skill FIRST on every session start, context resume, or context reset. Required before any other work. Handles stop_flag, orphan detection, and workflow compliance."
 argument-hint: "No arguments needed - just invoke to bootstrap ACP workflow"
 ---
 
-# ACP Agent Control Protocol
+# ACP Agent Control Panel
 
 **Version:** 1.0.3 | Single-file skill consolidating bootstrap and protocol reference.
 
