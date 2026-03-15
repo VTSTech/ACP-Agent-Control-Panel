@@ -1,6 +1,6 @@
 # ACP Agent Quick Reference
 
-**Version:** 1.0.3 | **Spec:** See [ACP-Specification.md](https://github.com/VTSTech/ACP-Agent-Control-Panel/blob/main/ACP-Specification.md) for full details
+**Version:** 1.0.4 | **Spec:** See [ACP-Specification.md](https://github.com/VTSTech/ACP-Agent-Control-Panel/blob/main/ACP-Specification.md) for full details
 
 ---
 
@@ -37,7 +37,8 @@ If `activity_id` is set in your context, you MUST complete it before starting ne
 │                                                                 │
 │  Q: Is this a new session?                                      │
 │     → Run: curl localhost:8766/api/status                       │
-│     → If active, restore: GET /api/todos, GET /api/summary      │
+│     → If active, bootstrap: GET /api/whoami, POST register      │
+│     → Restore: GET /api/todos, GET /api/summary                 │
 │                                                                 │
 │  Q: Am I about to use Read/Write/Edit/Bash/Grep/Glob/LS?        │
 │     → STOP! POST /api/action FIRST, get activity_id             │
@@ -56,6 +57,10 @@ If `activity_id` is set in your context, you MUST complete it before starting ne
 │     → Read it, adjust behavior                                  │
 │     → If requires_ack=true, POST /api/nudge/ack                 │
 │                                                                 │
+│  Q: Did I see hints.a2a.pending_count > 0?                      │
+│     → GET /api/a2a/history?to=<my_name>                         │
+│     → Process pending messages from other agents                 │
+│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -72,8 +77,17 @@ If `activity_id` is set in your context, you MUST complete it before starting ne
 │  1. Check if ACP server is running:                             │
 │     curl -s -u admin:secret http://localhost:8766/api/status    │
 │                                                                 │
-│  2. If running, you MUST follow ACP Workflow for ALL actions    │
-│  3. If not running, proceed normally (no ACP integration)       │
+│  2. Establish identity:                                         │
+│     GET /api/whoami                                             │
+│                                                                 │
+│  3. Register with Agent Registry (v1.0.4):                      │
+│     POST /api/agents/register {"agent_name": "...", ...}        │
+│                                                                 │
+│  4. Log bootstrap activity:                                     │
+│     POST /api/action {"action": "CHAT", "target": "bootstrap"}  │
+│                                                                 │
+│  5. If running, you MUST follow ACP Workflow for ALL actions    │
+│  6. If not running, proceed normally (no ACP integration)       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -130,13 +144,15 @@ POST /api/nudge/ack {}
 │  BEFORE using Read/Write/Edit/Bash/Grep/Glob/LS:                │
 │                                                                 │
 │  □ STEP 1: POST /api/action {"action": "READ|WRITE|EDIT|BASH",  │
-│           "target": "...", "details": "..."}                   │
+│           "target": "...", "details": "...",                    │
+│           "metadata": {"agent_name": "..."}}                    │
 │  □ STEP 2: Receive activity_id from response                    │
-│  □ STEP 3: NOW execute the tool (Read/Write/Edit/Bash)          │
-│  □ STEP 4: POST /api/complete {"activity_id": "...", "result":  │
+│  □ STEP 3: Check hints.a2a for pending messages (v1.0.4)        │
+│  □ STEP 4: NOW execute the tool (Read/Write/Edit/Bash)          │
+│  □ STEP 5: POST /api/complete {"activity_id": "...", "result":  │
 │           "..."}                                               │
 │                                                                 │
-│  ⚠️ STEPS 1-2 MUST happen BEFORE STEP 3 ⚠️                      │
+│  ⚠️ STEPS 1-3 MUST happen BEFORE STEP 4 ⚠️                      │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -151,9 +167,10 @@ POST /api/action {
   "result": "Previous result",
   "action": "READ",                     # New action
   "target": "/path/to/file",
-  "details": "Purpose of this action"
+  "details": "Purpose of this action",
+  "metadata": {"agent_name": "Super Z"}
 }
-→ {activity_id, stop_flag, session_tokens}
+→ {activity_id, stop_flag, session_tokens, hints}
 ```
 
 This pattern ensures you never forget to complete - it's automatic!
@@ -169,6 +186,8 @@ This pattern ensures you never forget to complete - it's automatic!
 | **Starting work without checking ACP status** | May miss stop_flag or nudge | Check `/api/status` at session start |
 | **Not completing activities** | Orphan tasks pile up | Always call `/api/complete` when done |
 | **Multiple agents without attribution** | Can't tell who did what | Use `agent_name` in metadata |
+| **Ignoring A2A hints** (v1.0.4) | Miss messages from other agents | Check `hints.a2a` in every response |
+| **Not registering with Agent Registry** (v1.0.4) | Not discoverable for A2A | `POST /api/agents/register` at startup |
 
 ---
 
@@ -176,10 +195,13 @@ This pattern ensures you never forget to complete - it's automatic!
 
 **All agents using ACP MUST:**
 
-1. **Log every action** via `/api/action` BEFORE executing
-2. **Log every shell command** via `/api/shell/add` AFTER executing
-3. **Sync TODO state** via `/api/todos/update` when TODOs change
-4. **Check stop flag** before starting any new activity
+1. **Log bootstrap as FIRST message** - Every agent MUST send bootstrap before any other ACP interaction
+2. **Register with Agent Registry** - Register agent name and capabilities (v1.0.4)
+3. **Log every action** via `/api/action` BEFORE executing
+4. **Log every shell command** via `/api/shell/add` AFTER executing
+5. **Sync TODO state** via `/api/todos/update` when TODOs change
+6. **Check stop flag** before starting any new activity
+7. **Check A2A hints** for pending inter-agent messages (v1.0.4)
 
 ---
 
@@ -189,9 +211,10 @@ This pattern ensures you never forget to complete - it's automatic!
 
 ```
 1. CHECK STATUS → GET /api/status (if stop_flag=true, STOP)
-2. LOG ACTION   → POST /api/action {action, target, details, content_size}
-3. EXECUTE      → Do the action
-4. COMPLETE     → POST /api/complete {activity_id, result, content_size}
+2. LOG ACTION   → POST /api/action {action, target, details, content_size, metadata}
+3. CHECK A2A    → hints.a2a.pending_count > 0? GET /api/a2a/history (v1.0.4)
+4. EXECUTE      → Do the action
+5. COMPLETE     → POST /api/complete {activity_id, result, content_size}
 ```
 
 ### Combined Workflow (Recommended)
@@ -205,9 +228,10 @@ POST /api/action {
   "action": "READ",                     # New action
   "target": "/path/to/file",
   "details": "Purpose of this action",
-  "content_size": 35000                 # v1.0.1: Chars to be read
+  "content_size": 35000,                # v1.0.1: Chars to be read
+  "metadata": {"agent_name": "Super Z"}
 }
-→ {activity_id, stop_flag, session_tokens, tokens_remaining}
+→ {activity_id, stop_flag, session_tokens, tokens_remaining, hints}
 ```
 
 ### Action Types
@@ -223,6 +247,7 @@ POST /api/action {
 | `SEARCH` | Web search, grep, find | Query + results |
 | `TODO` | TODO state changes | Minimal |
 | `CHAT` | Conversational exchanges, Q&A, planning | Input tokens |
+| `A2A` | **v1.0.4** Agent-to-agent communication | Minimal |
 
 ### Nudge Handling (v1.0.2)
 
@@ -273,6 +298,7 @@ POST /api/action {
   "target": "/file.py",
   "metadata": {
     "agent_name": "Super Z",      # Who performed this action
+    "model_name": "gpt-4o",       # v1.0.3: Model identifier
     "source": "user_request",     # Origin of action
     "file_hash": "abc123",
     "related_to": "issue-42"
@@ -306,9 +332,10 @@ POST /api/action {
   "target": "/src/config.py",
   "details": "Loading application configuration",
   "priority": "high",
-  "content_size": 5000
+  "content_size": 5000,
+  "metadata": {"agent_name": "Super Z"}
 }
-→ {"activity_id": "143052-a1b2c3", ...}
+→ {"activity_id": "143052-a1b2c3", "hints": {...}}
 
 # 2. Execute the read
 [Use native Read tool to read /src/config.py]
@@ -318,6 +345,158 @@ POST /api/complete {
   "activity_id": "143052-a1b2c3",
   "result": "Read 150 lines, found 3 config sections"
 }
+```
+
+---
+
+## A2A AGENT REGISTRY (v1.0.4)
+
+### Overview
+
+The Agent Registry enables multi-agent discovery and presence tracking. Every agent MUST register at startup.
+
+### Register Agent
+
+```bash
+POST /api/agents/register {
+  "agent_name": "Super Z",
+  "capabilities": ["code-generation", "file-editing", "web-development"],
+  "model_name": "gpt-4o",
+  "endpoint": "http://localhost:8080"  # Optional, for remote agents
+}
+→ {
+  "success": true,
+  "agent": {
+    "name": "Super Z",
+    "capabilities": [...],
+    "status": "online",
+    "registered_at": "2025-03-14T10:00:00",
+    "last_seen": "2025-03-14T10:00:00"
+  }
+}
+```
+
+### List Registered Agents
+
+```bash
+GET /api/agents
+→ {
+  "success": true,
+  "agents": [
+    {
+      "name": "Super Z",
+      "capabilities": ["code-generation", "file-editing"],
+      "model_name": "gpt-4o",
+      "status": "online",
+      "online": true,
+      "tokens_used": 42000
+    }
+  ],
+  "count": 1,
+  "primary_agent": "Super Z"
+}
+```
+
+### Unregister Agent
+
+```bash
+POST /api/agents/unregister {"agent_name": "LocalClaw"}
+→ {"success": true, "message": "Agent 'LocalClaw' unregistered"}
+```
+
+---
+
+## A2A MESSAGING (v1.0.4)
+
+### Overview
+
+A2A Messaging enables lightweight inter-agent communication through a message queue pattern.
+
+### Send Message
+
+```bash
+POST /api/a2a/send {
+  "from_agent": "Super Z",
+  "to_agent": "LocalClaw",
+  "type": "request",           # request | response | notification
+  "action": "analyze_file",    # Action identifier
+  "payload": {
+    "file_path": "/project/main.py",
+    "analysis_type": "complexity"
+  },
+  "priority": "high",          # normal | high | urgent
+  "ttl": 3600                  # Time-to-live in seconds
+}
+→ {
+  "success": true,
+  "message": {
+    "id": "143052-abc123",
+    "from_agent": "Super Z",
+    "to_agent": "LocalClaw",
+    "type": "request",
+    "action": "analyze_file",
+    "created_at": "2025-03-14T10:30:00",
+    "expires_at": "2025-03-14T11:30:00"
+  }
+}
+```
+
+### Get Message History
+
+```bash
+# All messages
+GET /api/a2a/history
+
+# Messages to specific agent
+GET /api/a2a/history?to=LocalClaw
+
+# Messages from specific agent
+GET /api/a2a/history?from=SuperZ
+
+# Filter by type
+GET /api/a2a/history?type=request
+```
+
+### A2A Hints (Automatic Notification)
+
+When you include `agent_name` in activity metadata, A2A hints notify you of pending messages:
+
+```bash
+POST /api/action {"action": "READ", "target": "file.py", "metadata": {"agent_name": "LocalClaw"}}
+→ {
+  "activity_id": "...",
+  "hints": {
+    "a2a": {
+      "pending_count": 3,
+      "senders": ["Super Z", "DataProcessor"],
+      "preview": {
+        "from": "Super Z",
+        "action": "file_analysis_complete",
+        "msg_id": "143000-xyz789"
+      }
+    }
+  }
+}
+```
+
+**Agent workflow for A2A hints:**
+```
+1. Check hints.a2a in response
+2. If pending_count > 0:
+   a. GET /api/a2a/history?to=<my_agent_name>
+   b. Process each message based on type and action
+   c. Send response if needed via POST /api/a2a/send
+3. Continue with task
+```
+
+### A2A Message Flow Example
+
+```
+1. Agent registers: POST /api/agents/register
+2. Agent sends request: POST /api/a2a/send {"type": "request", ...}
+3. Recipient discovers via hints.a2a.pending_count
+4. Recipient retrieves: GET /api/a2a/history?to=<name>
+5. Recipient processes and responds: POST /api/a2a/send {"type": "response", ...}
 ```
 
 ---
@@ -368,35 +547,8 @@ python3 -c "import json; d=json.load(open('/tmp/data.json')); print(len(d['histo
 POST /api/shell/add {
   "command": "npm install express",
   "status": "completed",        # "running" | "completed" | "error"
-  "output_preview": "added 57 packages in 3s"  # First 200 chars
-}
-```
-
-### Example: Shell Command
-
-```bash
-# 1. Log the BASH action
-POST /api/action {
-  "action": "BASH",
-  "target": "npm install express",
-  "details": "Installing express dependency"
-}
-→ {"activity_id": "143055-d4e5f6", ...}
-
-# 2. Execute the command
-[Run: npm install express]
-
-# 3. Log to shell history
-POST /api/shell/add {
-  "command": "npm install express",
-  "status": "completed",
-  "output_preview": "added 57 packages in 3s"
-}
-
-# 4. Complete the activity
-POST /api/complete {
-  "activity_id": "143055-d4e5f6",
-  "result": "Express installed successfully"
+  "output_preview": "added 57 packages in 3s",  # First 200 chars
+  "metadata": {"agent_name": "Super Z"}
 }
 ```
 
@@ -448,34 +600,12 @@ POST /api/todos/update {
 
 # Add single TODO
 POST /api/todos/add {
-  "todo": {"content": "New task", "status": "pending", "priority": "high"}
+  "todo": {"content": "New task", "status": "pending", "priority": "high"},
+  "agent_name": "Super Z"
 }
 
 # Clear completed
 POST /api/todos/clear
-```
-
-### Example: TODO Workflow
-
-```bash
-# 1. At session start - restore state
-GET /api/todos
-→ {"todos": [...]}
-
-# 2. When completing a task - update ACP
-POST /api/todos/update {
-  "todos": [
-    {"id": "1", "content": "Setup project", "status": "completed"},
-    {"id": "2", "content": "Write tests", "status": "in_progress"}
-  ]
-}
-
-# 3. Also log as activity
-POST /api/action {
-  "action": "TODO",
-  "target": "1",
-  "details": "Marked 'Setup project' as completed"
-}
 ```
 
 ---
@@ -533,26 +663,6 @@ POST /api/action {"action": "READ", "target": "/file.py", "content_size": 10000}
 
 **Why it matters:** Re-reading files won't inflate your token count. Session reset clears deduplication tracking.
 
-### Native Tool Tracking (v1.0.1)
-
-When using native Read/Write/Edit tools, include `content_size` for accurate tracking:
-
-```bash
-# After reading 35,000 chars with native Read tool:
-POST /api/action {
-  "action": "READ",
-  "target": "/file.py",
-  "content_size": 35000   # 35,000 / 3.5 = 10,000 tokens
-}
-
-# After writing 5,000 chars with native Write tool:
-POST /api/complete {
-  "activity_id": "abc123",
-  "result": "Written",
-  "content_size": 5000    # 5,000 / 3.5 = 1,428 tokens
-}
-```
-
 ### Per-Agent Token Tracking
 
 **Context Isolation:** The first agent to log an activity becomes the "primary agent" and owns the main context. Other agents (subagents, LocalClaw, etc.) are tracked separately.
@@ -584,6 +694,7 @@ GET /api/status
 2. GET /api/summary     # Condensed session state
 3. GET /api/todos       # Restore TODO state
 4. GET /api/notes       # Review saved notes
+5. GET /api/agents      # See registered agents (v1.0.4)
 ```
 
 ### Before Context Compression
@@ -632,7 +743,7 @@ GET /api/csrf-token
 |------|---------|--------|
 | 401 | Auth failed | Check credentials, retry |
 | 403 | Stop requested / Invalid CSRF (if enabled) | STOP if stop_flag, else refresh CSRF |
-| 404 | Not found | Activity or file doesn't exist |
+| 404 | Not found | Activity, file, or agent doesn't exist |
 | 413 | File too large | Use download instead of view |
 | 429 | Rate limited | Wait before retrying |
 
@@ -648,12 +759,21 @@ GET /api/csrf-token
 → GET /api/status
 ← {stop_flag: false, tokens_percent: 15}
 
+→ POST /api/agents/register {"agent_name": "Super Z", "capabilities": ["code-generation"]}
+← {success: true, agent: {...}}
+
+→ POST /api/action {"action": "CHAT", "target": "Session bootstrap", "metadata": {"agent_name": "Super Z", "source": "bootstrap"}}
+← {activity_id: "143000-boot01"}
+
 → GET /api/todos
 ← {todos: [{"id": "1", "content": "Review code", "status": "pending"}]}
 
+→ GET /api/agents
+← {agents: [...], count: 1, primary_agent: "Super Z"}
+
 # === FILE READ ===
 → POST /api/action {"action": "READ", "target": "config.py", "details": "Load config", "metadata": {"agent_name": "Super Z"}}
-← {activity_id: "143052-a1b2c3", stop_flag: false}
+← {activity_id: "143052-a1b2c3", stop_flag: false, hints: {...}}
 
 → [Read config.py using native tool]
 
@@ -672,12 +792,20 @@ GET /api/csrf-token
 → POST /api/complete {"activity_id": "143055-d4e5f6", "result": "requests 2.31.0 installed"}
 ← {success: true}
 
+# === A2A MESSAGING (v1.0.4) ===
+→ POST /api/a2a/send {"from_agent": "Super Z", "to_agent": "LocalClaw", "type": "request", "action": "analyze", "payload": {...}}
+← {success: true, message: {...}}
+
+# (Later, when LocalClaw responds)
+→ POST /api/action {"action": "READ", "target": "...", "metadata": {"agent_name": "Super Z"}}
+← {hints: {a2a: {pending_count: 1, senders: ["LocalClaw"]}}}
+
+→ GET /api/a2a/history?to=SuperZ
+← {messages: [{from_agent: "LocalClaw", type: "response", ...}]}
+
 # === TODO UPDATE ===
 → POST /api/todos/update {"todos": [{"id": "1", "content": "Review code", "status": "completed"}]}
 ← {success: true}
-
-→ POST /api/action {"action": "TODO", "target": "1", "details": "Marked completed"}
-← {activity_id: "143058-g7h8i9"}
 
 # === CONTEXT RECOVERY (before compression) ===
 → POST /api/notes/add {"category": "decision", "content": "Chose REST over GraphQL", "importance": "high"}
@@ -694,7 +822,8 @@ GET /api/csrf-token
 | File | Purpose |
 |------|---------|
 | `ACP-Specification.md` | Full specification (human-readable) |
-| `ACP-Agent-Guide.md` | This file (agent-optimized) |
+| `ACP-Agent-Guide-MIN.md` | Quick reference (minimal) |
+| `ACP-Agent-Guide-MAX.md` | This file (detailed) |
 | `acp_session_summary.md` | Persistent session state |
 | `agent_activity.json` | Session data storage |
 | `acp_restart.log` | Restart debugging logs |
@@ -707,36 +836,65 @@ GET /api/csrf-token
 ┌─────────────────────────────────────────────────────────────┐
 │  ACP MANDATORY CHECKLIST                                     │
 ├─────────────────────────────────────────────────────────────┤
+│  □ Register with Agent Registry at startup (v1.0.4)         │
+│  □ Log bootstrap activity as FIRST message                   │
 │  □ Check status before starting (GET /api/status)           │
 │  □ Log action BEFORE executing (POST /api/action)           │
+│  □ Check hints.a2a for pending messages (v1.0.4)            │
 │  □ Include content_size for native tools (v1.0.1)           │
 │  □ Include agent_name and model_name in metadata            │
 │  □ Log shell commands AFTER executing (POST /api/shell/add) │
 │  □ Complete activity when done (POST /api/complete)         │
 │  □ Sync TODOs on change (POST /api/todos/update)            │
 │  □ Save notes for recovery (POST /api/notes/add)            │
-│  □ Export summary before compression (POST /api/summary/export) │
+│  □ Export summary before compression                        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### v1.0.1 Quick Additions
+---
+
+## APPENDIX: VERSION FEATURES
+
+### v1.0.4 Features
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  NEW IN v1.0.1                                               │
+│  NEW IN v1.0.4                                               │
 ├─────────────────────────────────────────────────────────────┤
-│  • priority: "high" | "medium" | "low"                       │
-│  • metadata: {arbitrary: "key-value pairs"}                  │
-│  • agent_name: Identify yourself in activity metadata       │
-│  • GET /api/whoami - Self-awareness/identity endpoint       │
-│  • GET /api/activity/{id} - Single activity lookup           │
-│  • content_size: Character count for token tracking          │
-│  • hints: Contextual hints in /api/action response           │
-│  • CHAT: New action type for conversational exchanges        │
+│  • A2A Agent Registry API - agent discovery/tracking        │
+│  • POST /api/agents/register - Register with capabilities   │
+│  • POST /api/agents/unregister - Remove from registry       │
+│  • GET /api/agents - List all registered agents             │
+│  • A2A Messaging API - inter-agent communication            │
+│  • POST /api/a2a/send - Send message to another agent       │
+│  • GET /api/a2a/history - Get message history               │
+│  • A2A action type for communication logging                │
+│  • hints.a2a field - notification of pending messages       │
+│  • POST /api/reset - Full session reset (agents + A2A)      │
+│  • Agent online status (last_seen < 60s)                    │
+│  • Primary agent owns context window                        │
+│  • Per-agent token tracking in agent_tokens{}               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### v1.0.2 Quick Additions
+### v1.0.3 Features
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  NEW IN v1.0.3                                               │
+├─────────────────────────────────────────────────────────────┤
+│  • model_name metadata field - separate agent from model     │
+│  • File Deduplication: READ auto-skips tokens for re-reads   │
+│  • tokens_deduplicated field in activity                     │
+│  • GET /api/stats/duration - Performance analysis            │
+│  • Slow activity detection (>30s threshold)                  │
+│  • POST /api/activity/batch - Bulk operations                │
+│  • Max 50 operations per batch                               │
+│  • Performance trend tracking (last 20 activities)           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### v1.0.2 Features
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -753,200 +911,26 @@ GET /api/csrf-token
 │  • Context isolation from subagents and other agents         │
 │  • POST /api/shutdown: Graceful session termination          │
 │  • Shutdown nudge: type: "shutdown" notifies agent           │
-│  • Check for nudge AND orphan_warning in EVERY response!     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Orphan Detection (v1.0.2)
-
-Before starting a new task, check if there are orphan running tasks:
-
-```bash
-POST /api/action {"action": "READ", "target": "new_file.py"}
-→ {
-    "activity_id": "...",
-    "running_count": 2,
-    "orphan_warning": {               # ← Check this field!
-      "count": 2,
-      "tasks": [
-        {"id": "abc123", "action": "READ", "target": "old_file.py"},
-        {"id": "def456", "action": "WRITE", "target": "another.py"}
-      ],
-      "suggestion": "Complete or acknowledge orphan tasks"
-    }
-  }
-```
-
-**When orphan_warning present:**
-```bash
-# Complete each orphan task:
-POST /api/complete {"activity_id": "abc123", "result": "Completed late"}
-POST /api/complete {"activity_id": "def456", "result": "Completed late"}
-
-# Or use combined endpoint to complete and proceed:
-POST /api/action {
-  "complete_id": "abc123",
-  "result": "Completed",
-  "action": "READ",
-  "target": "new_file.py"
-}
-```
-
-**Why it matters:** Starting multiple tasks without completing them causes "task leakage" - activities stuck in running state. Always check `orphan_warning` and `running_count` before starting new work.
-
-### TODO Metadata
-
-TODOs support metadata for agent attribution:
-
-```bash
-POST /api/todos/add {
-  "todo": {
-    "content": "Implement API endpoint",
-    "status": "pending",
-    "priority": "high"
-  },
-  "agent_name": "Super Z",      # Who created this TODO
-  "tool": "planning",           # Which tool created it
-  "skill": "fullstack-dev"      # Which skill (if applicable)
-}
-
-# Response includes metadata
-→ {
-    "success": true,
-    "todo": {
-      "id": "143052-abc123",
-      "content": "Implement API endpoint",
-      "status": "pending",
-      "priority": "high",
-      "created": "2026-03-13T19:59:00",
-      "metadata": {
-        "agent_name": "Super Z",
-        "tool": "planning",
-        "skill": "fullstack-dev"
-      }
-    }
-  }
-```
-
-**Why it matters:** In multi-agent scenarios, knowing which agent created a TODO helps with task ownership and debugging workflow issues.
-
-### Shell History Metadata
-
-Shell commands support metadata for agent attribution:
-
-```bash
-POST /api/shell/add {
-  "command": "npm install express",
-  "status": "completed",
-  "output_preview": "added 57 packages",
-  "agent_name": "LocalClaw",    # Who ran this command
-  "tool": "shell",              # Which tool executed it
-  "metadata": {                 # Or pass full metadata object
-    "agent_name": "LocalClaw",
-    "tool": "shell",
-    "working_dir": "/home/z/my-project"
-  }
-}
-
-# Response includes metadata
-→ {
-    "success": true,
-    "entry": {
-      "id": "143055-def456",
-      "command": "npm install express",
-      "timestamp": "2026-03-13T19:59:30",
-      "status": "completed",
-      "output_preview": "added 57 packages",
-      "metadata": {
-        "agent_name": "LocalClaw",
-        "tool": "shell",
-        "working_dir": "/home/z/my-project"
-      }
-    }
-  }
-```
-
-**Why it matters:** When multiple agents share a session, seeing who ran each command helps understand the workflow and debug issues.
-
-
-
-### Activity Hints (v1.0.1)
-
-When you call `/api/action`, the response may include `hints`:
-
-```bash
-POST /api/action {"action": "EDIT", "target": "/file.py"}
-→ {
-  "activity_id": "xxx",
-  "hints": {
-    "modified_this_session": true,      # File already touched
-    "modification_count": 3,             # Accessed 3 times
-    "last_action": "READ",               # Last was READ
-    "related_todos": [{"id": "1", "content": "Fix file.py"}],
-    "loop_detected": true,               # Same action repeated 3+ times
-    "suggestion": "Consider if this is intentional"
-  }
-}
-```
-
-**Use hints to:**
-- Avoid redundant operations (check `modified_this_session`)
-- Find related TODOs (check `related_todos`)
-- Break out of loops (check `loop_detected`)
-- Learn from past errors (check `recent_errors`, `last_error`)
-
----
-
-*ACP Agent Guide v1.0.3*
-
----
-
-## APPENDIX: v1.0.3 FEATURES
-
-### Duration Statistics
-
-```bash
-GET /api/stats/duration
-→ {
-    "stats": {
-      "by_action": {
-        "READ": {"count": 15, "average_ms": 3000, "average_str": "3.00s"},
-        "WRITE": {...}
-      },
-      "slow_activities": [{"action": "READ", "duration_str": "45.0s"}],
-      "average_duration_ms": 4800,
-      "trend": [{"action": "READ", "duration_ms": 3000}]
-    }
-  }
-```
-
-**Use cases:** Find slow operations, track performance trends, identify bottlenecks.
-
-### Batch Operations
-
-```bash
-POST /api/activity/batch {"operations": [
-  {"type": "start", "action": "READ", "target": "/file1.py"},
-  {"type": "start", "action": "READ", "target": "/file2.py"},
-  {"type": "complete", "activity_id": "prev-id", "result": "Done"}
-]}
-→ {"success": true, "results": [...], "count": 3}
-```
-
-**Limits:** Max 50 operations per batch.
+### v1.0.1 Features
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  NEW IN v1.0.3                                               │
+│  NEW IN v1.0.1                                               │
 ├─────────────────────────────────────────────────────────────┤
-│  • model_name metadata field - separate agent from model     │
-│  • File Deduplication: READ auto-skips tokens for re-reads   │
-│  • tokens_deduplicated field in activity                     │
-│  • GET /api/stats/duration - Performance analysis            │
-│  • Slow activity detection (>30s threshold)                  │
-│  • POST /api/activity/batch - Bulk operations                │
-│  • Max 50 operations per batch                               │
-│  • Performance trend tracking (last 20 activities)           │
-│  • Shell logging exception: don't log ACP API calls          │
+│  • priority: "high" | "medium" | "low"                       │
+│  • metadata: {arbitrary: "key-value pairs"}                  │
+│  • agent_name: Identify yourself in activity metadata       │
+│  • GET /api/whoami - Self-awareness/identity endpoint       │
+│  • GET /api/activity/{id} - Single activity lookup           │
+│  • content_size: Character count for token tracking          │
+│  • hints: Contextual hints in /api/action response           │
+│  • CHAT: New action type for conversational exchanges        │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+*ACP Agent Guide v1.0.4*

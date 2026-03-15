@@ -1704,28 +1704,6 @@ Unregister an agent.
 }
 ```
 
-#### POST /api/agents/heartbeat
-
-Update agent's last_seen timestamp to indicate the agent is still active.
-
-**Request:**
-```json
-{
-  "agent_name": "LocalClaw"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true
-}
-```
-
-**When to use:**
-- Call periodically (every 30 seconds) to maintain online status
-- Agents are considered offline if last_seen > 60 seconds ago
-
 ### 4.13 A2A Messaging API (v1.0.4)
 
 The A2A Messaging API enables lightweight inter-agent communication through a message queue pattern.
@@ -1924,10 +1902,6 @@ AI agents using ACP **MUST** follow this workflow:
 │  4. LOG COMPLETION                                              │
 │     POST /api/complete {"activity_id": "...", "result": "..."} │
 │     Or: {"activity_id": "...", "error": "error message"}       │
-│                                                                 │
-│  5. PERIODIC HEARTBEAT (v1.0.4)                                 │
-│     POST /api/agents/heartbeat {"agent_name": "..."}           │
-│     Call every 30 seconds to maintain online status            │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -2361,7 +2335,6 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 - **NEW**: A2A Agent Registry API - agent discovery and presence tracking
 - **NEW**: `POST /api/agents/register` - Register agent with capabilities
 - **NEW**: `POST /api/agents/unregister` - Unregister an agent
-- **NEW**: `POST /api/agents/heartbeat` - Maintain online status
 - **NEW**: `GET /api/agents` - List all registered agents
 - **NEW**: `GET /api/agents/{name}` - Get specific agent details
 - **NEW**: A2A Messaging API - lightweight inter-agent communication

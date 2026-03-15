@@ -1,18 +1,18 @@
 ---
 name: acp
-description: "ACP Agent Control Panel - CRITICAL: Invoke this skill FIRST on every session start, context resume, or context reset. Required before any other work. Handles stop_flag, orphan detection, and workflow compliance."
+description: "ACP Agent Control Panel - CRITICAL: Invoke this skill FIRST on every session start, context resume, or context reset. Required before any other work. Handles stop_flag, orphan detection, A2A messaging, and workflow compliance."
 argument-hint: "No arguments needed - just invoke to bootstrap ACP workflow"
 ---
 
 # ACP Agent Control Panel
 
-**Version:** 1.0.3 | Single-file skill consolidating bootstrap and protocol reference.
+**Version:** 1.0.4 | Single-file skill consolidating bootstrap and protocol reference.
 **ACP_URL** | Ask Human for this, use instead of http://localhost:8766/
 ---
 
 ## BOOTSTRAP SEQUENCE (MANDATORY)
 
-**CRITICAL REQUIREMENT (v1.0.3):** Any agent interacting with ACP MUST send a bootstrap as their FIRST message. No exceptions.
+**CRITICAL REQUIREMENT (v1.0.4):** Any agent interacting with ACP MUST send a bootstrap as their FIRST message. No exceptions.
 
 | Scenario | Bootstrap Required |
 |----------|-------------------|
@@ -26,7 +26,9 @@ argument-hint: "No arguments needed - just invoke to bootstrap ACP workflow"
 **Bootstrap is NOT optional.** An agent that skips bootstrap:
 - Will not have their token usage tracked correctly
 - Will not appear in `agent_tokens{}`
+- Will not be registered in the Agent Registry
 - May interfere with primary agent tracking
+- Will not receive A2A message notifications
 - Is in violation of ACP protocol
 
 Execute these steps IN ORDER before any other actions:
@@ -46,6 +48,7 @@ curl -s -u admin:secret http://localhost:8766/api/status
 | `stop_flag: true` | **STOP IMMEDIATELY**. Inform user. Wait for resume. |
 | `running_count > 0` | Check for orphaned activities |
 | `orphan_warning` | Complete orphan tasks before new work |
+| `tunnel_url` | Note tunnel URL for remote access |
 
 ### 2. Establish Agent Identity
 
@@ -67,7 +70,24 @@ curl -s -u admin:secret http://localhost:8766/api/whoami
 
 Use the `agent_name` from this point forward in all activity metadata.
 
-### 3. Log Bootstrap Activity (MANDATORY)
+### 3. Register with Agent Registry (v1.0.4)
+
+**NEW:** Register your agent with capabilities for A2A discovery:
+
+```bash
+curl -s -u admin:secret -X POST http://localhost:8766/api/agents/register \
+  -H "Content-Type: application/json" \
+  -d '{"agent_name": "Super Z", "capabilities": ["code-generation", "file-editing", "web-development"], "model_name": "gpt-4o"}'
+```
+
+**For secondary agents (LocalClaw, subagents):**
+```bash
+curl -s -u admin:secret -X POST http://localhost:8766/api/agents/register \
+  -H "Content-Type: application/json" \
+  -d '{"agent_name": "LocalClaw", "capabilities": ["code-analysis", "file-reading"], "model_name": "qwen2.5-coder:0.5b", "endpoint": "http://localhost:8080"}'
+```
+
+### 4. Log Bootstrap Activity (MANDATORY)
 
 **CRITICAL:** Every agent MUST log a bootstrap activity as their FIRST message to ACP. This is NOT optional.
 
@@ -93,7 +113,7 @@ curl -s -u admin:secret http://localhost:8766/api/status
 # Check: primary_agent should be set to your agent_name
 ```
 
-### 4. Handle STOP ALL
+### 5. Handle STOP ALL
 
 If `stop_flag: true`:
 
@@ -107,7 +127,7 @@ Inform user: "STOP ALL is active. Waiting for resume."
 Wait for user to clear stop_flag or give explicit resume instruction.
 ```
 
-### 5. Complete Orphaned Activities
+### 6. Complete Orphaned Activities
 
 If `orphan_warning` present:
 
@@ -116,11 +136,20 @@ GET /api/all
 POST /api/complete {"activity_id": "orphan_id", "result": "Completed after context recovery"}
 ```
 
-### 6. Restore Session State
+### 7. Restore Session State
 
 ```bash
 GET /api/todos    # Restore TODO list
 GET /api/notes    # Recover saved notes
+GET /api/agents   # See registered agents (v1.0.4)
+```
+
+### 8. Check for A2A Messages (v1.0.4)
+
+If `hints.a2a.pending_count > 0` in response:
+
+```bash
+GET /api/a2a/history?to=<your_agent_name>
 ```
 
 ---
@@ -173,6 +202,7 @@ POST /api/action {"complete_id": "prev_id", "result": "prev result", "action": "
 | SEARCH | Web search, grep, find |
 | TODO | TODO state changes |
 | CHAT | Conversational Q&A, planning, reasoning |
+| A2A | **v1.0.4** Agent-to-agent communication |
 
 ### CHAT Action Type (v1.0.1)
 
@@ -198,6 +228,20 @@ POST /api/action {
 
 **Why it matters:** Pure conversational exchanges consume context window tokens but were previously untracked. CHAT ensures accurate token accounting for all agent activity.
 
+### A2A Action Type (v1.0.4)
+
+Automatically logged when using `/api/a2a/send`. Captures inter-agent communication:
+
+```json
+{
+  "id": "143052-abc123",
+  "action": "A2A",
+  "target": "Super Z → LocalClaw",
+  "details": "request: analyze_file",
+  "status": "completed"
+}
+```
+
 ---
 
 ## ACTIVITY HINTS (v1.0.1)
@@ -216,7 +260,12 @@ The `hints` field in `/api/action` responses provides contextual information:
     "loop_detected": false,
     "loop_count": 0,
     "suggestion": null,
-    "active_todos": 2
+    "active_todos": 2,
+    "a2a": {
+      "pending_count": 2,
+      "senders": ["LocalClaw"],
+      "preview": {"from": "LocalClaw", "action": "analysis_done", "msg_id": "..."}
+    }
   }
 }
 ```
@@ -233,11 +282,144 @@ The `hints` field in `/api/action` responses provides contextual information:
 | `loop_count` | integer | Number of repetitions if loop detected |
 | `suggestion` | string | Actionable advice when patterns detected |
 | `active_todos` | integer | Count of in-progress TODOs |
+| `a2a` | object | **v1.0.4** A2A hints for pending messages |
 
 **Loop Detection:** If `loop_detected: true`, consider:
 - Changing your approach
 - Asking user for clarification
 - Checking `suggestion` field for guidance
+
+---
+
+## A2A HINTS (v1.0.4)
+
+When you include `agent_name` in activity metadata, A2A hints notify you of pending messages:
+
+```json
+{
+  "hints": {
+    "a2a": {
+      "pending_count": 3,
+      "senders": ["LocalClaw", "DataProcessor"],
+      "preview": {
+        "from": "LocalClaw",
+        "action": "file_analysis_complete",
+        "msg_id": "143000-xyz789"
+      }
+    }
+  }
+}
+```
+
+**A2A Hint Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `pending_count` | integer | Number of unread messages for this agent |
+| `senders` | array | Unique list of sender agent names |
+| `preview` | object | Preview of most recent message |
+
+**Agent workflow for A2A hints:**
+```
+1. Check hints.a2a in response
+2. If pending_count > 0:
+   a. GET /api/a2a/history?to=<my_agent_name>
+   b. Process each message based on type and action
+   c. Send response if needed via POST /api/a2a/send
+3. Continue with task
+```
+
+---
+
+## A2A AGENT REGISTRY (v1.0.4)
+
+### List Registered Agents
+
+```bash
+GET /api/agents
+→ {
+  "success": true,
+  "agents": [
+    {
+      "name": "Super Z",
+      "capabilities": ["code-generation", "file-editing"],
+      "model_name": "gpt-4o",
+      "status": "online",
+      "online": true,
+      "tokens_used": 42000
+    }
+  ],
+  "count": 1,
+  "primary_agent": "Super Z"
+}
+```
+
+### Get Specific Agent
+
+```bash
+GET /api/agents/LocalClaw
+→ {"success": true, "agent": {...}}
+```
+
+### Register Agent
+
+```bash
+POST /api/agents/register {
+  "agent_name": "LocalClaw",
+  "capabilities": ["code-analysis", "file-reading"],
+  "model_name": "qwen2.5-coder:0.5b",
+  "endpoint": "http://localhost:8080"
+}
+```
+
+### Unregister Agent
+
+```bash
+POST /api/agents/unregister {"agent_name": "LocalClaw"}
+```
+
+---
+
+## A2A MESSAGING (v1.0.4)
+
+### Send Message
+
+```bash
+POST /api/a2a/send {
+  "from_agent": "Super Z",
+  "to_agent": "LocalClaw",
+  "type": "request",           # request | response | notification
+  "action": "analyze_file",    # Action identifier
+  "payload": {"file": "/project/app.py"},
+  "priority": "high",          # normal | high | urgent
+  "ttl": 3600                  # Time-to-live in seconds
+}
+```
+
+**Message Types:**
+| Type | Description |
+|------|-------------|
+| `request` | Request for action/response |
+| `response` | Response to a previous request |
+| `notification` | One-way notification |
+
+### Get Message History
+
+```bash
+GET /api/a2a/history
+GET /api/a2a/history?to=LocalClaw        # Messages to agent
+GET /api/a2a/history?from=SuperZ         # Messages from agent
+GET /api/a2a/history?type=request        # Filter by type
+```
+
+### A2A Message Flow Example
+
+```
+1. Agent registers: POST /api/agents/register
+2. Agent sends request: POST /api/a2a/send {..., "type": "request"}
+3. Recipient discovers via hints.a2a.pending_count
+4. Recipient retrieves: GET /api/a2a/history?to=<name>
+5. Recipient responds: POST /api/a2a/send {"type": "response", "reply_to": "msg_id"}
+```
 
 ---
 
@@ -430,6 +612,7 @@ POST /api/complete {"activity_id": "...", "result": "...", "content_size": 5000}
 GET /api/summary     # Session state
 GET /api/todos       # Restore TODOs
 GET /api/notes       # Saved notes
+GET /api/agents      # Registered agents (v1.0.4)
 ```
 
 **Before compression:**
@@ -456,7 +639,8 @@ GET /api/all
   "history": [...],
   "session_tokens": 45000,
   "context_window": 200000,
-  "tokens_remaining": 155000
+  "tokens_remaining": 155000,
+  "tunnel_url": "https://xxx.trycloudflare.com"
 }
 ```
 
@@ -493,6 +677,24 @@ GET /api/activity/143052-a1b2c3
     "status": "completed",
     "priority": "high",
     "metadata": {"source": "user_request"}
+  }
+}
+```
+
+### POST /api/reset (v1.0.4)
+
+Full session reset - clears all state including agents and A2A messages:
+
+```bash
+POST /api/reset
+→ {
+  "success": true,
+  "message": "Session reset complete",
+  "stats": {
+    "history_cleared": 50,
+    "agents_cleared": 3,
+    "a2a_cleared": 15,
+    "tokens_reset": 45000
   }
 }
 ```
@@ -611,7 +813,7 @@ GET /api/csrf-token  # Check if enabled
 |------|--------|
 | 401 | Check credentials |
 | 403 | Stop if stop_flag, else refresh CSRF |
-| 404 | Activity/file not found |
+| 404 | Activity/file/agent not found |
 | 429 | Rate limited, wait |
 
 **Error Response Format:**
@@ -624,6 +826,9 @@ GET /api/csrf-token  # Check if enabled
 
 // Complete error
 {"activity_id": "...", "error": "File not found"}
+
+// Agent error (v1.0.4)
+{"success": false, "error": "Agent not found"}
 ```
 
 ---
@@ -634,6 +839,7 @@ GET /api/csrf-token  # Check if enabled
 # Session start
 GET /api/status
 GET /api/whoami
+POST /api/agents/register {"agent_name": "...", "capabilities": [...]}  # v1.0.4
 GET /api/todos
 
 # Log action
@@ -652,12 +858,19 @@ POST /api/shell/add {"command": "...", "status": "completed|error", "output_prev
 GET /api/todos
 POST /api/todos/update {"todos": [...]}
 
+# A2A Messaging (v1.0.4)
+GET /api/agents
+POST /api/agents/register {"agent_name": "...", ...}
+POST /api/a2a/send {"from_agent": "...", "to_agent": "...", "type": "request", ...}
+GET /api/a2a/history?to=<agent_name>
+
 # Utility
 GET /api/all                    # Combined status + history
 GET /api/running                # Running activities
 GET /api/history                # Completed activity history
 GET /api/activity/{id}          # Single activity
 GET /api/stats/duration         # Duration statistics
+POST /api/reset                 # Full session reset (v1.0.4)
 
 # Shutdown
 POST /api/shutdown {"reason": "...", "export_summary": true}
@@ -668,12 +881,12 @@ POST /api/nudge/ack {}          # Acknowledge shutdown nudge
 
 ## STORAGE FILES
 
-Per spec §3.7 — paths are relative to the server working directory unless overridden by env vars:
+Per spec §3.9 — paths are relative to the server working directory unless overridden by env vars:
 
 | File | Purpose | Persistence |
 |------|---------|-------------|
-| `acp_data.json` | Session state storage (configurable via `ACP_DATA_FILE`) | Per-session |
-| `acp_session_summary.md` | Context recovery export (configurable via `ACP_SUMMARY_FILE`) | Survives restarts |
+| `agent_activity.json` | Session state storage (configurable via `GLMACP_DATA_FILE`) | Per-session |
+| `acp_session_summary.md` | Context recovery export (configurable via `GLMACP_SUMMARY_FILE`) | Survives restarts |
 | `ACP-Specification.md` | Canonical specification | Reference only |
 
 ---
@@ -684,9 +897,11 @@ Per spec §3.7 — paths are relative to the server working directory unless ove
 - [ ] **BOOTSTRAP IS MANDATORY** - Every agent MUST send bootstrap as first message
 - [ ] Check status (`GET /api/status`)
 - [ ] Establish identity (`GET /api/whoami`)
+- [ ] **Register with Agent Registry** (`POST /api/agents/register`) - v1.0.4
 - [ ] **Log bootstrap activity** (`POST /api/action` with `action: "CHAT"`, `agent_name`)
 - [ ] Log action BEFORE executing
 - [ ] Check `stop_flag`, `nudge`, `orphan_warning`, `hints` in every response
+- [ ] **Check A2A hints** for pending messages - v1.0.4
 - [ ] Include `content_size` for native tools
 - [ ] Include `agent_name` and `model_name` in metadata
 - [ ] Log shell commands to `/api/shell/add` (except ACP calls)
@@ -698,4 +913,4 @@ Per spec §3.7 — paths are relative to the server working directory unless ove
 
 ---
 
-*ACP Skill v1.0.3 - Aligned with ACP-Specification.md*
+*ACP Skill v1.0.4 - Aligned with ACP-Specification.md*

@@ -1,6 +1,6 @@
 # ACP Agent Quick Reference
 
-**Version:** 1.0.3 | **Spec:** [ACP-Specification.md](https://github.com/VTSTech/ACP-Agent-Control-Panel/blob/main/ACP-Specification.md)
+**Version:** 1.0.4 | **Spec:** [ACP-Specification.md](https://github.com/VTSTech/ACP-Agent-Control-Panel/blob/main/ACP-Specification.md)
 
 ---
 
@@ -26,12 +26,37 @@ curl -s -u admin:secret http://localhost:8766/api/status
 
 ---
 
+## BOOTSTRAP SEQUENCE (MANDATORY)
+
+**v1.0.4:** Every agent MUST bootstrap before any other ACP interaction:
+
+```bash
+# 1. Check status
+GET /api/status
+
+# 2. Establish identity
+GET /api/whoami
+
+# 3. Register with Agent Registry (v1.0.4)
+POST /api/agents/register {"agent_name": "Super Z", "capabilities": [...], "model_name": "..."}
+
+# 4. Log bootstrap activity
+POST /api/action {"action": "CHAT", "target": "Session bootstrap", "metadata": {"agent_name": "Super Z", "source": "bootstrap"}}
+
+# 5. Restore state
+GET /api/todos
+GET /api/notes
+GET /api/agents
+```
+
+---
+
 ## EVERY ACTION
 
 **Before Read/Write/Edit/Bash/Grep/Glob/LS:**
 ```bash
-POST /api/action {"action": "READ|WRITE|EDIT|BASH|SEARCH", "target": "...", "details": "..."}
-→ {activity_id, stop_flag, session_tokens, nudge?, orphan_warning?}
+POST /api/action {"action": "READ|WRITE|EDIT|BASH|SEARCH", "target": "...", "details": "...", "metadata": {"agent_name": "Super Z"}}
+→ {activity_id, stop_flag, session_tokens, hints?, nudge?, orphan_warning?}
 ```
 
 **After execution:**
@@ -59,6 +84,7 @@ POST /api/action {"complete_id": "prev_id", "result": "prev result", "action": "
 | SEARCH | Web search, grep, find |
 | TODO | TODO state changes |
 | CHAT | Conversational Q&A, planning |
+| A2A | **v1.0.4** Agent-to-agent communication |
 
 ---
 
@@ -146,6 +172,7 @@ POST /api/complete {"activity_id": "...", "result": "...", "content_size": 5000}
 GET /api/summary     # Session state
 GET /api/todos       # Restore TODOs
 GET /api/notes       # Saved notes
+GET /api/agents      # Registered agents (v1.0.4)
 ```
 
 **Before compression:**
@@ -161,6 +188,56 @@ GET /api/summary/export  # Export to markdown
 Check `orphan_warning` in response. If present, complete orphan tasks first:
 ```bash
 POST /api/complete {"activity_id": "orphan_id", "result": "Completed late"}
+```
+
+---
+
+## A2A AGENT REGISTRY (v1.0.4)
+
+```bash
+# List agents
+GET /api/agents
+→ {"agents": [...], "count": 2, "primary_agent": "Super Z"}
+
+# Register agent
+POST /api/agents/register {"agent_name": "...", "capabilities": [...], "model_name": "..."}
+
+# Unregister
+POST /api/agents/unregister {"agent_name": "..."}
+```
+
+---
+
+## A2A MESSAGING (v1.0.4)
+
+```bash
+# Send message
+POST /api/a2a/send {
+  "from_agent": "Super Z",
+  "to_agent": "LocalClaw",
+  "type": "request",           # request | response | notification
+  "action": "analyze_file",
+  "payload": {"file": "/project/app.py"},
+  "priority": "normal"         # normal | high | urgent
+}
+
+# Get messages
+GET /api/a2a/history
+GET /api/a2a/history?to=LocalClaw
+GET /api/a2a/history?from=SuperZ
+```
+
+**A2A Hints** in `/api/action` response:
+```json
+{
+  "hints": {
+    "a2a": {
+      "pending_count": 2,
+      "senders": ["LocalClaw"],
+      "preview": {"from": "LocalClaw", "action": "analysis_done"}
+    }
+  }
+}
 ```
 
 ---
@@ -221,7 +298,7 @@ GET /api/csrf-token  # Check if enabled
 |------|--------|
 | 401 | Check credentials |
 | 403 | Stop if stop_flag, else refresh CSRF |
-| 404 | Activity/file not found |
+| 404 | Activity/file/agent not found |
 | 429 | Rate limited, wait |
 
 ---
@@ -231,6 +308,8 @@ GET /api/csrf-token  # Check if enabled
 ```bash
 # Session start
 GET /api/status
+GET /api/whoami
+POST /api/agents/register {"agent_name": "Super Z", "capabilities": ["code-generation"]}  # v1.0.4
 GET /api/todos
 
 # File read
@@ -246,6 +325,9 @@ POST /api/complete {"activity_id": "...", "result": "Installed"}
 
 # TODO update
 POST /api/todos/update {"todos": [{"id": "1", "content": "Task", "status": "completed"}]}
+
+# A2A message (v1.0.4)
+POST /api/a2a/send {"from_agent": "Super Z", "to_agent": "LocalClaw", "type": "request", "action": "analyze"}
 ```
 
 ---
@@ -253,6 +335,7 @@ POST /api/todos/update {"todos": [{"id": "1", "content": "Task", "status": "comp
 ## CHECKLIST
 
 - [ ] Check status before starting
+- [ ] **Register with Agent Registry** (v1.0.4)
 - [ ] Log action BEFORE executing
 - [ ] Include `content_size` for native tools
 - [ ] Include `agent_name` and `model_name` in metadata
@@ -260,9 +343,10 @@ POST /api/todos/update {"todos": [{"id": "1", "content": "Task", "status": "comp
 - [ ] Complete activity when done
 - [ ] Sync TODOs on change
 - [ ] Check `nudge` and `orphan_warning` in responses
+- [ ] **Check A2A hints** for pending messages (v1.0.4)
 - [ ] Use batch ops for multiple activities (v1.0.3)
 - [ ] Save notes before compression
 
 ---
 
-*ACP Agent Guide v1.0.3*
+*ACP Agent Guide v1.0.4*

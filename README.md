@@ -67,6 +67,10 @@ The full implementation includes everything in minimal plus:
 | **v1.0.3** File Deduplication | READ skips tokens for already-read files |
 | **v1.0.3** Duration Statistics | GET /api/stats/duration for performance analysis |
 | **v1.0.3** Batch Operations | POST /api/activity/batch for bulk activities |
+| **v1.0.4** Agent Registry | Register agents, track online status, capabilities |
+| **v1.0.4** A2A Messaging | Inter-agent communication via message queue |
+| **v1.0.4** A2A Hints | Notification of pending messages in activity response |
+
 
 ## API Reference
 
@@ -88,6 +92,13 @@ The full implementation includes everything in minimal plus:
 | POST | `/api/nudge/ack` | **v1.0.2** Acknowledge nudge |
 | GET | `/api/stats/duration` | **v1.0.3** Activity duration statistics |
 | POST | `/api/activity/batch` | **v1.0.3** Batch activity operations |
+| GET | `/api/agents` | **v1.0.4** List all registered agents |
+| GET | `/api/agents/{name}` | **v1.0.4** Get specific agent details |
+| POST | `/api/agents/register` | **v1.0.4** Register agent with capabilities |
+| POST | `/api/agents/unregister` | **v1.0.4** Unregister an agent |
+
+| POST | `/api/a2a/send` | **v1.0.4** Send message to another agent |
+| GET | `/api/a2a/history` | **v1.0.4** Get A2A message history |
 
 ### Extended Endpoints (Full Version)
 
@@ -125,6 +136,7 @@ The full implementation includes everything in minimal plus:
 | `API` | `POST https://api.example.com` | External API call |
 | `TODO` | `task-id-123` | TODO update |
 | `CHAT` | `discussion topic` | **v1.0.1** Conversational/cognitive work |
+| `A2A` | `AgentA → AgentB` | **v1.0.4** Agent-to-agent communication |
 
 ## Integration Pattern
 
@@ -133,6 +145,7 @@ Agents should follow this workflow:
 ```
 0. SESSION START (recommended)
    GET /api/whoami  → Establish identity (use agent_name in metadata)
+   POST /api/agents/register → Register with Agent Registry (v1.0.4)
    GET /api/todos   → Restore TODO state
 
 1. CHECK STATUS → GET /api/status (check stop_flag)
@@ -195,9 +208,9 @@ requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
 
 ## Documentation
 
-- **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.3)
-- **[ACP-Agent-Guide-MIN.md](./ACP-Agent-Guide-MIN.md)** - Quick reference for AI agents (v1.0.3)
-- **[ACP-Agent-Guide-MAX.md](./ACP-Agent-Guide-MAX.md)** - Complete integration guide with examples (v1.0.3)
+- **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.4)
+- **[ACP-Agent-Guide-MIN.md](./ACP-Agent-Guide-MIN.md)** - Quick reference for AI agents (v1.0.4)
+- **[ACP-Agent-Guide-MAX.md](./ACP-Agent-Guide-MAX.md)** - Complete integration guide with examples (v1.0.4)
 
 ## Screenshots
 
