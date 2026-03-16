@@ -35,15 +35,22 @@ Execute on every session start / context resume:
 
 ---
 
-## THE PATTERN
+## THE PATTERN (MANDATORY)
 
 ```
-LOG → EXECUTE → COMPLETE
-/api/action → Tool → /api/complete
+CHECK → LOG → EXECUTE → COMPLETE
+/api/status → /api/action → Tool → /api/complete
 BEFORE → NOW → AFTER
 ```
 
-**NEVER execute before logging.**
+### MANDATORY Rules (Non-Negotiable)
+
+1. **CHECK** `/api/status` on session start and after context recovery for `stop_flag`
+2. **LOG** every action BEFORE executing via `/api/action`
+3. **LOG** every shell command via `/api/shell/add` (except ACP API calls)
+4. **COMPLETE** every activity when done via `/api/complete`
+
+**NEVER execute before logging. NEVER skip logging.**
 
 ---
 
@@ -53,7 +60,7 @@ BEFORE → NOW → AFTER
 
 ```bash
 POST {ACP_URL}/api/action {
-  "action": "READ|WRITE|EDIT|BASH|SEARCH|SKILL|API|CHAT",
+  "action": "READ|WRITE|EDIT|BASH|SEARCH|SKILL|API|TODO|CHAT|A2A",
   "target": "file path or resource",
   "details": "human description",
   "content_size": 0,           # Character count for token tracking
@@ -73,7 +80,7 @@ POST {ACP_URL}/api/complete {
 }
 ```
 
-### Combined (recommended)
+### Combined (recommended for efficiency)
 
 ```bash
 POST {ACP_URL}/api/action {
@@ -106,15 +113,34 @@ POST {ACP_URL}/api/action {
 
 ## RESPONSE FIELDS
 
-Check these in every `/api/action` response:
+Check these in **every** `/api/action` response:
 
 | Field | Action |
 |-------|--------|
 | `stop_flag: true` | STOP immediately |
 | `nudge` | Human guidance, ack if `requires_ack: true` |
 | `orphan_warning` | Complete orphan tasks first |
-| `hints.loop_detected` | Change approach |
-| `hints.a2a.pending_count` | Pending A2A messages |
+| `hints.modified_this_session` | File was already modified - check before editing |
+| `hints.loop_detected` | Same action repeated 3+ times - change approach |
+| `hints.suggestion` | Actionable advice - follow it |
+| `hints.a2a.pending_count` | Pending A2A messages - retrieve via /api/a2a/history |
+
+---
+
+## SHELL LOGGING (MANDATORY)
+
+**Log ALL shell commands EXCEPT ACP API calls:**
+
+```bash
+POST {ACP_URL}/api/shell/add {
+  "command": "npm install",
+  "status": "completed|error",
+  "output_preview": "first 200 chars",
+  "agent_name": "Super Z"
+}
+```
+
+Do this for EVERY terminal command executed.
 
 ---
 
@@ -147,19 +173,7 @@ GET  {ACP_URL}/api/todos
 POST {ACP_URL}/api/todos/update {"todos": [...]}
 ```
 
----
-
-## SHELL LOGGING
-
-Log ALL shell commands EXCEPT ACP API calls:
-
-```bash
-POST {ACP_URL}/api/shell/add {
-  "command": "npm install",
-  "status": "completed|error",
-  "output_preview": "first 200 chars"
-}
-```
+**Note:** Log significant TODO changes as `TODO` action type via `/api/action`.
 
 ---
 
@@ -172,13 +186,16 @@ GET  /api/whoami
 POST /api/agents/register {"agent_name": "...", "capabilities": [...]}
 POST /api/action {"action": "CHAT", "target": "bootstrap", "metadata": {...}}
 
-# Workflow
+# Workflow (MANDATORY pattern)
 POST /api/action {"action": "READ", "target": "file.py", "metadata": {...}}
 # ... execute tool ...
 POST /api/complete {"activity_id": "...", "result": "done"}
 
-# Combined
+# Combined (efficient)
 POST /api/action {"complete_id": "prev", "result": "ok", "action": "READ", "target": "next", "metadata": {...}}
+
+# Shell commands
+POST /api/shell/add {"command": "...", "status": "completed", "output_preview": "..."}
 
 # Utility
 GET  /api/all           # Combined status + history
@@ -198,10 +215,12 @@ GET  /api/a2a/history?to=<name>
 - [ ] INVOKE THIS SKILL FIRST
 - [ ] Get `ACP_URL` from human
 - [ ] Bootstrap: status → whoami → register → log
-- [ ] Check `stop_flag`, `nudge`, `orphan_warning`, `hints` in every response
-- [ ] LOG before EXECUTE before COMPLETE
+- [ ] Check `stop_flag`, `nudge`, `orphan_warning`, `hints` in **every** response
+- [ ] LOG before EXECUTE before COMPLETE (**MANDATORY - non-negotiable**)
 - [ ] Include `agent_name` in all metadata
-- [ ] Log shell commands (except ACP calls)
+- [ ] Log **ALL** shell commands via `/api/shell/add` (except ACP calls)
+- [ ] Log TODO changes as `TODO` action type
+- [ ] Use combined endpoint for efficiency: complete previous + start new in one call
 
 ---
 
