@@ -2781,6 +2781,13 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 - **NEW**: `agents` and `a2a_messages` fields in session state
 - **NEW**: `POST /api/reset` - Full session reset including agents and A2A messages
 - **NEW**: Agent online status computed from last_seen timestamp (< 60s = online)
+- **NEW**: POST /api/reset — Added a full session reset endpoint that clears all state, including agents and A2A messages, while resetting tokens to startup values.
+- **NEW**: A2A Action Type — A new activity type that automatically logs inter-agent communication events, capturing the sender, recipient, and message type for audit history.
+- **NEW**: A2A Context Support — Support for contextId mapping, enabling the grouping of related tasks into sessions for multi-turn inter-agent interactions.
+- **NEW**: Agent Registry Data Models — Formalized the Agent, AgentSkill, and AgentCard objects to standardize how capabilities and status are discovered and shared across the network.
+- **NEW**: A2A Message Schema — Defined the A2AMessage object, including mandatory fields for ttl (time-to-live), expires_at, and message priority.
+- **NEW**: A2A Hints — Integration of pending message notifications directly into the hints field of /api/action and /api/complete responses.
+- **NEW**: Multi-turn Interaction Tracking — Added A2AContext to the session state to track session-id to agent-activity mappings.
 - **DOC**: Added §3.7 Agent Object section
 - **DOC**: Added §3.8 A2A Message Object section
 - **DOC**: Added §4.12 Agent Registry API section
@@ -2788,8 +2795,11 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 - **DOC**: Added §5.5 A2A Communication Workflow section
 - **DOC**: Updated architecture diagram to show A2A components
 - **DOC**: Updated comparison table with Agent Registry and Inter-Agent Messaging
+- **FIX**: Metadata model separation — Clarified the separation of agent_name (identity) and model_name (execution engine) within the standard metadata fields to improve UI filtering and usage tracking.
+- **FIX**: Orphan Filtering — The orphan_warning logic now strictly filters tasks based on the agent_name provided in the request metadata, preventing agents from seeing each other's "stuck" tasks.
 - **UI**: GLMACP displays registered agents with online status
 - **UI**: A2A message indicator in activity responses
+
 
 ### v1.0.3
 - **NEW**: `model_name` metadata field - separates agent identity from model identifier for clean UI display
