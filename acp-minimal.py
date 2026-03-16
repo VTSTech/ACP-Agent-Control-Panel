@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-ACP Minimal v1.0.3 - Full Spec Compliance
+ACP Minimal v1.0.4 - Full Spec Compliance
+
 Endpoints: whoami, status, history, running, activity/{id}, action, start, complete,
            stop, resume, clear_history, reset, reset_session, shutdown, restart,
            nudge (GET+POST), nudge/ack,
@@ -11,11 +12,20 @@ Endpoints: whoami, status, history, running, activity/{id}, action, start, compl
            stats/duration, activity/batch,
            session, session/refresh, csrf-token,
            files/list, files/view, files/download, files/stats (read-only)
+           
+NEW in 1.0.4:
+           agents (GET), agents/register (POST), agents/unregister (POST), agents/{name} (GET)
+           a2a/send (POST), a2a/history (GET)
+           .well-known/agent-card.json (GET)
+           jsonrpc, a2a, api/jsonrpc (POST) - JSON-RPC 2.0 endpoints
+           
+A2A Compliance: JSON-RPC 2.0, Agent Card, contextId support
 """
 
-import json, os, base64, time, signal, threading
+import json, os, base64, time, signal, threading, uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime
+from datetime import datetime, timedelta
+from urllib.parse import urlparse, parse_qs
 
 # --- CONFIG ---
 PORT            = int(os.environ.get("ACP_PORT", "8766"))
@@ -28,6 +38,48 @@ SESSION_TIMEOUT = int(os.environ.get("ACP_SESSION_TIMEOUT", "86400"))
 ORPHAN_TIMEOUT  = int(os.environ.get("ACP_ORPHAN_TIMEOUT", "300"))
 
 SESSION_START = time.time()
+
+# --- JSON-RPC 2.0 Error Codes ---
+JSONRPC_PARSE_ERROR = -32700
+JSONRPC_INVALID_REQUEST = -32600
+JSONRPC_METHOD_NOT_FOUND = -32601
+JSONRPC_INVALID_PARAMS = -32602
+JSONRPC_INTERNAL_ERROR = -32603
+JSONRPC_TASK_NOT_FOUND = -32001
+JSONRPC_TASK_NOT_RUNNING = -32002
+
+# --- ACP Agent Card (1.0.4) ---
+ACP_AGENT_CARD = {
+    "name": "ACP Server",
+    "description": "Agent Control Panel - Monitoring and observability server for AI agents",
+    "url": "",
+    "version": "1.0.4",
+    "capabilities": {
+        "streaming": False,
+        "pushNotifications": False
+    },
+    "defaultInputModes": ["text/plain", "application/json"],
+    "defaultOutputModes": ["text/plain", "application/json"],
+    "skills": [
+        {
+            "id": "activity_tracking",
+            "name": "Activity Tracking",
+            "description": "Log and monitor agent activities with token estimation",
+            "tags": ["monitoring", "observability", "tokens"],
+            "examples": ["Log a file read", "Track a bash command"]
+        },
+        {
+            "id": "a2a_messaging",
+            "name": "A2A Messaging",
+            "description": "Inter-agent communication via message queue",
+            "tags": ["messaging", "multi-agent", "coordination"],
+            "examples": ["Send message to another agent", "Check inbox"]
+        }
+    ],
+    "authentication": {
+        "schemes": ["Basic"]
+    }
+}
 
 # --- DATA ---
 
@@ -51,7 +103,12 @@ def load_data():
         "session_start": SESSION_START,
         "agent_tokens": {},
         "shell_log": [],
-        "errors": []
+        "errors": [],
+        # NEW 1.0.4 fields
+        "agents": {},           # Agent Registry
+        "a2a_messages": [],     # A2A Message Queue
+        "contexts": {},         # contextId -> session mapping
+        "agent_skills": {}      # AgentSkill objects per agent
     }
     if os.path.exists(DATA_FILE):
         try:
@@ -87,6 +144,9 @@ def save_data(data):
 def make_activity_id():
     return datetime.now().strftime("%H%M%S-") + str(int(time.time() * 100) % 100)
 
+def make_context_id():
+    return "ctx-" + uuid.uuid4().hex[:12]
+
 def estimate_tokens(text_list, content_size=0):
     return int((len("".join(map(str, text_list))) + content_size) / 3.5)
 
@@ -118,7 +178,36 @@ def check_orphans(data):
             })
     return orphans if orphans else None
 
-def get_hints(data, target):
+def get_a2a_hints(data, agent_name):
+    """Get A2A hints for an agent (pending messages). 1.0.4"""
+    if not agent_name:
+        return {}
+    hints = {}
+    messages_for_agent = []
+    now_ts = time.time()
+    
+    for msg in data.get("a2a_messages", []):
+        if msg.get("to_agent") == agent_name:
+            try:
+                expires = datetime.fromisoformat(msg["expires_at"]).timestamp()
+                if expires > now_ts:
+                    messages_for_agent.append(msg)
+            except:
+                pass
+    
+    if messages_for_agent:
+        hints["pending_count"] = len(messages_for_agent)
+        hints["senders"] = list(set(m.get("from_agent") for m in messages_for_agent if m.get("from_agent")))
+        if messages_for_agent:
+            latest = messages_for_agent[0]
+            hints["preview"] = {
+                "from": latest.get("from_agent"),
+                "action": latest.get("action"),
+                "msg_id": latest.get("id")
+            }
+    return {"a2a": hints} if hints else {}
+
+def get_hints(data, target, agent_name=None):
     hints = {
         "modified_this_session": False,
         "modification_count": 0,
@@ -152,6 +241,13 @@ def get_hints(data, target):
     hints["recent_errors"] = len(data.get("errors", [])[-5:])
     if data.get("errors"):
         hints["last_error"] = data["errors"][-1].get("message")
+    
+    # Add A2A hints if agent_name provided (1.0.4)
+    if agent_name:
+        a2a_hints = get_a2a_hints(data, agent_name)
+        if a2a_hints:
+            hints["a2a"] = a2a_hints.get("a2a", {})
+    
     return hints
 
 def format_duration(ms):
@@ -332,15 +428,54 @@ def reset_state():
         "session_start": time.time(),
         "agent_tokens": {},
         "shell_log": [],
-        "errors": []
+        "errors": [],
+        # 1.0.4 fields
+        "agents": {},
+        "a2a_messages": [],
+        "contexts": {},
+        "agent_skills": {}
     }
+
+# --- A2A Helpers ---
+
+def create_a2a_message(from_agent, to_agent, msg_type, action=None, payload=None, priority="normal", ttl=3600, reply_to=None):
+    """Create an A2A message object."""
+    now = datetime.now()
+    return {
+        "id": make_activity_id(),
+        "from_agent": from_agent,
+        "to_agent": to_agent,
+        "type": msg_type,  # request | response | notification
+        "action": action,
+        "payload": payload or {},
+        "priority": priority,
+        "reply_to": reply_to,
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(seconds=ttl)).isoformat(),
+        "ttl": ttl
+    }
+
+def get_agent_status(data, agent_name):
+    """Get agent status with online/offline computation."""
+    agents = data.get("agents", {})
+    if agent_name not in agents:
+        return None
+    agent = agents[agent_name].copy()
+    try:
+        last_seen = datetime.fromisoformat(agent.get("last_seen", "")).timestamp()
+        agent["online"] = (time.time() - last_seen) < 60
+        agent["status"] = "online" if agent["online"] else "offline"
+    except:
+        agent["online"] = False
+        agent["status"] = "offline"
+    return agent
 
 # --- UI ---
 _UI = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>ACP Minimal v1.0.3</title>
+    <title>ACP Minimal v1.0.4</title>
     <style>
         :root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#c9d1d9; --primary:#ff6b35; --success:#238636; --danger:#da3633; --warning:#d29922; --info:#58a6ff; }
         body { font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); margin:0; padding:20px; }
@@ -397,13 +532,14 @@ _UI = """<!DOCTYPE html>
         .progress-bar { height:4px; background:var(--border); border-radius:2px; margin-top:6px; overflow:hidden; }
         .progress-fill { height:100%; background:var(--primary); transition:width 0.3s; }
         .progress-fill.warn { background:var(--warning); } .progress-fill.danger { background:var(--danger); }
+        .a2a-badge { background:rgba(136,238,136,0.2); color:#88ee88; border:1px solid #88ee88; }
     </style>
 </head>
 <body>
 <div class="container">
     <div class="header">
         <div>
-            <h2 style="margin:0;color:var(--primary)">&#x1F916; ACP Minimal <small style="color:#6e7681;font-size:0.8rem">v1.0.3</small></h2>
+            <h2 style="margin:0;color:var(--primary)">&#x1F916; ACP Minimal <small style="color:#6e7681;font-size:0.8rem">v1.0.4</small></h2>
             <div id="timer" style="font-family:monospace;font-size:0.8rem;color:#8b949e;margin-top:4px">Sync in 2.0s</div>
         </div>
         <div class="sys-controls">
@@ -428,6 +564,7 @@ _UI = """<!DOCTYPE html>
         <div class="stat-card"><span class="stat-label">Session</span><span id="stat-session" class="stat-val">0m</span></div>
         <div class="stat-card"><span class="stat-label">Todos</span><span id="stat-todos" class="stat-val">0</span></div>
         <div class="stat-card"><span class="stat-label">Errors</span><span id="stat-errors" class="stat-val">0</span></div>
+        <div class="stat-card"><span class="stat-label">A2A Pending</span><span id="stat-a2a" class="stat-val">0</span></div>
     </div>
     <div class="grid">
         <div id="main-content">
@@ -525,6 +662,11 @@ _UI = """<!DOCTYPE html>
         document.getElementById('stat-session').innerText = sess(d.session?.elapsed_seconds||0);
         document.getElementById('stat-todos').innerText = (d.todos||[]).length;
         document.getElementById('stat-errors').innerText = (d.errors||[]).length;
+        
+        // A2A pending count
+        const a2aPending = d.hints?.a2a?.pending_count || 0;
+        document.getElementById('stat-a2a').innerText = a2aPending;
+        document.getElementById('stat-a2a').className = 'stat-val'+(a2aPending>0?' a2a-badge':'');
 
         const bar = document.getElementById('token-bar');
         bar.style.width = Math.min(100,pct)+'%';
@@ -549,10 +691,6 @@ _UI = """<!DOCTYPE html>
             ? '<div class="orphan-banner"><strong>&#x26A0;&#xFE0F; ORPHAN WARNING:</strong> '+d.orphan_warning.count+' activit'+(d.orphan_warning.count===1?'y':'ies')+' running > 5min</div>'
             : '';
 
-        // Helper: update a panel container in-place to avoid re-triggering animations
-        // and losing scroll position. If the panel doesn't exist yet it is created
-        // (animation fires once, correctly). If it already exists only the title
-        // and body innerHTML are swapped while scrollTop is preserved.
         function patchPanel(container, title, bodyHTML, bodyStyle) {
             const existing = container.querySelector('.panel');
             if (!existing) {
@@ -606,9 +744,19 @@ _UI = """<!DOCTYPE html>
 
         // Agents — primary_agent gets orange star badge
         const ap = document.getElementById('agents-panel');
-        if (d.agent_tokens && Object.keys(d.agent_tokens).length) {
-            const agentBody = Object.entries(d.agent_tokens).map(([n,tok]) => '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)"><span class="agent-badge '+(n===d.primary_agent?'agent-primary':'agent-other')+'">'+esc(n)+(n===d.primary_agent?' &#x2605;':'')+'</span><span class="tag">'+tok+' tok</span></div>').join('');
-            patchPanel(ap, '&#x1F916; Agents', agentBody, '');
+        const agents = d.agents || {};
+        const agentTokens = d.agent_tokens || {};
+        const allAgentNames = new Set([...Object.keys(agents), ...Object.keys(agentTokens)]);
+        if (allAgentNames.size) {
+            const agentBody = Array.from(allAgentNames).map(n => {
+                const ag = agents[n] || {};
+                const tok = agentTokens[n] || 0;
+                const isPrimary = n === d.primary_agent;
+                const status = ag.status || (isPrimary ? 'online' : 'offline');
+                const statusClass = status === 'online' ? 'status-running' : 'status-error';
+                return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)"><span class="agent-badge '+(isPrimary?'agent-primary':'agent-other')+'">'+esc(n)+(isPrimary?' &#x2605;':'')+'</span><span><span class="status-pill '+statusClass+'" style="font-size:0.6rem">'+status+'</span> <span class="tag">'+tok+' tok</span></span></div>';
+            }).join('');
+            patchPanel(ap, '&#x1F916; Agents ('+allAgentNames.size+')', agentBody, '');
         } else { ap.innerHTML = ''; }
 
         // Shell
@@ -620,10 +768,11 @@ _UI = """<!DOCTYPE html>
 
         // Hints
         const hp = document.getElementById('hints-panel');
-        if (d.hints && (d.hints.loop_detected || d.hints.active_todos > 0)) {
+        if (d.hints && (d.hints.loop_detected || d.hints.active_todos > 0 || (d.hints.a2a && d.hints.a2a.pending_count > 0))) {
             const hintsBody = (d.hints.loop_detected?'<div style="color:var(--warning);margin-bottom:8px">&#x26A0;&#xFE0F; Loop detected: '+d.hints.loop_count+' repetitions</div>':'')
                 + (d.hints.suggestion?'<div style="color:var(--info)">'+esc(d.hints.suggestion)+'</div>':'')
-                + (d.hints.active_todos>0?'<div class="tag">&#x1F4CC; '+d.hints.active_todos+' active todos</div>':'');
+                + (d.hints.active_todos>0?'<div class="tag">&#x1F4CC; '+d.hints.active_todos+' active todos</div>':'')
+                + (d.hints.a2a && d.hints.a2a.pending_count>0?'<div class="tag" style="color:#88ee88">&#x1F4E7; '+d.hints.a2a.pending_count+' A2A messages from: '+esc(d.hints.a2a.senders?.join(', ')||'unknown')+'</div>':'');
             patchPanel(hp, '&#x1F4A1; Hints', hintsBody, '');
         } else { hp.innerHTML = ''; }
     }
@@ -674,6 +823,16 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+    def read_body(self):
+        """Read and parse JSON body from request."""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            if length > 0:
+                return json.loads(self.rfile.read(length))
+        except:
+            pass
+        return {}
+
     # ============================================================
     # GET
     # ============================================================
@@ -687,6 +846,10 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
             self.wfile.write(UI_HTML.encode('utf-8'))
+
+        # /.well-known/agent-card.json — 1.0.4 A2A Discovery
+        elif self.path == '/.well-known/agent-card.json':
+            self.send_json(ACP_AGENT_CARD)
 
         # /api/whoami — spec §4.10: returns identity context for agent bootstrap
         elif self.path == '/api/whoami':
@@ -731,7 +894,8 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
                 "nudge": d["nudge"],
                 "session": get_session_info(),
                 "orphan_warning": {"count": len(orphans), "tasks": orphans} if orphans else None,
-                "errors": d.get("errors", [])[-5:]
+                "errors": d.get("errors", [])[-5:],
+                "agents": d.get("agents", {})
             })
 
         # /api/all — combined convenience endpoint, spec §4.3
@@ -739,6 +903,8 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             d = load_data()
             tok = get_token_summary(d)
             orphans = check_orphans(d)
+            # Get hints with A2A info for primary agent
+            hints = get_hints(d, "", d.get("primary_agent"))
             base_dir = os.environ.get("ACP_BASE_DIR", ".")
             current_files = []
             try:
@@ -775,7 +941,9 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
                 "errors": d.get("errors", []),
                 "orphan_warning": {"count": len(orphans), "tasks": orphans} if orphans else None,
                 "current_files": current_files,
-                "base_dir": os.path.abspath(base_dir)
+                "base_dir": os.path.abspath(base_dir),
+                "hints": hints,
+                "agents": d.get("agents", {})
             })
 
         # /api/running — spec §4.3
@@ -826,151 +994,170 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
                     "success": True,
                     "message": "Summary exported to persistent file",
                     "filepath": filepath,
-                    "summary": content,
-                    "note": "Share this file with new AI sessions for context recovery"
+                    "note": "Share this file with new AI sessions for context recovery",
+                    "summary": content
                 })
             except Exception as e:
                 self.send_json({"success": False, "error": str(e)}, 500)
 
-        # /api/stats/duration — spec §4.8
+        # /api/stats/duration — spec §4.3
         elif self.path == '/api/stats/duration':
             d = load_data()
-            self.send_json({
-                "success": True,
-                "stats": calc_duration_stats(d),
-                "slow_threshold_seconds": 30.0
-            })
+            self.send_json({"success": True, "stats": calc_duration_stats(d)})
 
-        # /api/session — spec §4.10
+        # /api/session — spec §4.3
         elif self.path == '/api/session':
             self.send_json({"success": True, "session": get_session_info()})
 
-        # /api/csrf-token — spec §4.10 (CSRF disabled by default)
+        # /api/csrf-token — spec §4.2
         elif self.path == '/api/csrf-token':
             self.send_json({
                 "success": True,
                 "csrf_enabled": False,
-                "csrf_token": None,
-                "expires_in": None,
-                "message": "CSRF protection is disabled. Token not required."
+                "message": "CSRF protection is disabled by default"
             })
 
-        # /api/nudge GET — spec §4.11
-        elif self.path == '/api/nudge':
+        # /api/agents — 1.0.4: List all registered agents
+        elif self.path == '/api/agents':
             d = load_data()
+            agents = d.get("agents", {})
+            agent_list = []
+            for name in agents:
+                agent = get_agent_status(d, name)
+                if agent:
+                    agent_list.append(agent)
             self.send_json({
                 "success": True,
-                "nudge": d.get("nudge"),
-                "has_pending": d.get("nudge") is not None
+                "agents": agent_list,
+                "count": len(agent_list),
+                "primary_agent": d.get("primary_agent")
             })
 
-        # /api/files/list
-        elif self.path.startswith('/api/files/list'):
-            qs = self.path.split('?', 1)[1] if '?' in self.path else ''
-            rel = qs.replace('path=', '') if 'path=' in qs else self.headers.get('X-Path', '')
-            rel = rel.strip('/')
-            base = os.environ.get("ACP_BASE_DIR", ".")
-            full = os.path.join(base, rel) if rel else base
-            if not os.path.abspath(full).startswith(os.path.abspath(base)):
-                return self.send_json({"success": False, "error": "Access denied"}, 403)
-            if not os.path.exists(full):
-                return self.send_json({"success": False, "error": "Path not found"}, 404)
-            if not os.path.isdir(full):
-                return self.send_json({"success": False, "error": "Not a directory"}, 400)
-            try:
-                items = []
-                sort_by = self.headers.get('X-Sort-By', 'name')
-                for item in os.listdir(full):
-                    ip = os.path.join(full, item)
-                    st = os.stat(ip)
-                    items.append({
-                        "name": item,
-                        "is_dir": os.path.isdir(ip),
-                        "size": st.st_size if os.path.isfile(ip) else 0,
-                        "modified": datetime.fromtimestamp(st.st_mtime).isoformat()
-                    })
-                items.sort(key=lambda x: x["name"])
-                self.send_json({"success": True, "path": rel or "/", "items": items, "base_dir": base})
-            except Exception as e:
-                self.send_json({"success": False, "error": str(e)}, 500)
+        # /api/agents/{name} — 1.0.4: Get specific agent
+        elif self.path.startswith('/api/agents/') and self.path.count('/') == 3:
+            name = self.path.split('/')[-1]
+            if name in ['register', 'unregister']:
+                # Let POST handle these
+                self.send_json({"success": False, "error": "Use POST method"}, 405)
+                return
+            d = load_data()
+            agent = get_agent_status(d, name)
+            if agent:
+                self.send_json({"success": True, "agent": agent})
+            else:
+                self.send_json({"success": False, "error": f"Agent '{name}' not found"}, 404)
 
-        # /api/files/view
-        elif self.path.startswith('/api/files/view'):
-            qs = self.path.split('?', 1)[1] if '?' in self.path else ''
-            rel = qs.replace('path=', '') if 'path=' in qs else self.headers.get('X-Path', '')
-            rel = rel.strip('/')
-            base = os.environ.get("ACP_BASE_DIR", ".")
-            full = os.path.join(base, rel)
-            if not os.path.abspath(full).startswith(os.path.abspath(base)):
-                return self.send_json({"success": False, "error": "Access denied"}, 403)
-            if not os.path.exists(full):
-                return self.send_json({"success": False, "error": "File not found"}, 404)
-            if not os.path.isfile(full):
-                return self.send_json({"success": False, "error": "Not a file"}, 400)
-            if os.path.getsize(full) > 100000:
-                return self.send_json({"success": False, "error": "File too large for viewing (max 100KB)"}, 400)
-            try:
-                with open(full, 'r', encoding='utf-8', errors='replace') as f:
-                    content = f.read()
-                d = load_data()
-                tokens = len(content) // 4
-                self.send_json({
-                    "success": True,
-                    "path": rel,
-                    "content": content,
-                    "lines": content.count('\n') + 1,
-                    "size": len(content),
-                    "tokens": tokens,
-                    "session_tokens": d["tokens"] + tokens
-                })
-            except Exception as e:
-                self.send_json({"success": False, "error": str(e)}, 500)
+        # /api/a2a/history — 1.0.4: Get A2A message history
+        elif self.path.startswith('/api/a2a/history'):
+            d = load_data()
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            
+            messages = d.get("a2a_messages", [])
+            to_agent = params.get('to', [None])[0]
+            from_agent = params.get('from', [None])[0]
+            msg_type = params.get('type', [None])[0]
+            
+            # Filter messages
+            if to_agent:
+                messages = [m for m in messages if m.get("to_agent") == to_agent]
+            if from_agent:
+                messages = [m for m in messages if m.get("from_agent") == from_agent]
+            if msg_type:
+                messages = [m for m in messages if m.get("type") == msg_type]
+            
+            # Filter out expired messages
+            now_ts = time.time()
+            valid_messages = []
+            for m in messages:
+                try:
+                    expires = datetime.fromisoformat(m["expires_at"]).timestamp()
+                    if expires > now_ts:
+                        valid_messages.append(m)
+                except:
+                    pass
+            
+            self.send_json({
+                "success": True,
+                "messages": valid_messages,
+                "count": len(valid_messages)
+            })
 
-        # /api/files/download
-        elif self.path.startswith('/api/files/download'):
-            qs = self.path.split('?', 1)[1] if '?' in self.path else ''
-            rel = qs.replace('path=', '') if 'path=' in qs else ''
-            rel = rel.strip('/')
-            base = os.environ.get("ACP_BASE_DIR", ".")
-            full = os.path.join(base, rel)
-            if not os.path.abspath(full).startswith(os.path.abspath(base)):
-                self.send_response(403); self.end_headers(); return
-            if not os.path.exists(full) or not os.path.isfile(full):
-                self.send_response(404); self.end_headers(); return
-            try:
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/octet-stream')
-                self.send_header('Content-Disposition', f'attachment; filename="{os.path.basename(full)}"')
-                self.end_headers()
-                with open(full, 'rb') as f:
-                    self.wfile.write(f.read())
-            except:
-                self.send_response(500); self.end_headers()
-
-        # /api/files/stats
-        elif self.path == '/api/files/stats':
-            base = os.environ.get("ACP_BASE_DIR", ".")
-            try:
-                tf = td = ts = 0
-                for root, dirs, files in os.walk(base):
-                    td += len(dirs)
-                    tf += len(files)
-                    for fn in files:
-                        try: ts += os.path.getsize(os.path.join(root, fn))
-                        except: pass
-                self.send_json({
-                    "success": True,
-                    "base_dir": base,
-                    "total_files": tf,
-                    "total_directories": td,
-                    "total_size_bytes": ts,
-                    "total_size_mb": round(ts / (1024 * 1024), 2)
-                })
-            except Exception as e:
-                self.send_json({"success": False, "error": str(e)}, 500)
+        # File manager endpoints (read-only)
+        elif self.path.startswith('/api/files/'):
+            base_dir = os.environ.get("ACP_BASE_DIR", ".")
+            parts = self.path[len('/api/files/'):].split('/')
+            action = parts[0]
+            
+            if action == 'list':
+                try:
+                    path = base_dir if len(parts) == 1 else os.path.join(base_dir, *parts[1:])
+                    items = []
+                    for item in sorted(os.listdir(path))[:50]:
+                        ip = os.path.join(path, item)
+                        items.append({
+                            "name": item,
+                            "is_dir": os.path.isdir(ip),
+                            "size": os.path.getsize(ip) if os.path.isfile(ip) else 0,
+                            "modified": datetime.fromtimestamp(os.path.getmtime(ip)).isoformat()
+                        })
+                    self.send_json({"success": True, "files": items, "path": os.path.abspath(path)})
+                except Exception as e:
+                    self.send_json({"success": False, "error": str(e)}, 500)
+            
+            elif action == 'view':
+                try:
+                    rel_path = '/'.join(parts[1:])
+                    path = os.path.join(base_dir, rel_path)
+                    if os.path.isfile(path):
+                        with open(path, 'r', encoding='utf-8') as f:
+                            content = f.read(100000)  # 100KB limit
+                        self.send_json({"success": True, "content": content, "path": path})
+                    else:
+                        self.send_json({"success": False, "error": "Not a file"}, 400)
+                except Exception as e:
+                    self.send_json({"success": False, "error": str(e)}, 500)
+            
+            elif action == 'download':
+                try:
+                    rel_path = '/'.join(parts[1:])
+                    path = os.path.join(base_dir, rel_path)
+                    if os.path.isfile(path):
+                        with open(path, 'rb') as f:
+                            content = f.read()
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'application/octet-stream')
+                        self.send_header('Content-Disposition', f'attachment; filename="{os.path.basename(path)}"')
+                        self.send_header('Content-Length', str(len(content)))
+                        self.end_headers()
+                        self.wfile.write(content)
+                    else:
+                        self.send_json({"success": False, "error": "Not a file"}, 400)
+                except Exception as e:
+                    self.send_json({"success": False, "error": str(e)}, 500)
+            
+            elif action == 'stats':
+                try:
+                    rel_path = '/'.join(parts[1:])
+                    path = os.path.join(base_dir, rel_path)
+                    if os.path.exists(path):
+                        self.send_json({
+                            "success": True,
+                            "path": path,
+                            "is_dir": os.path.isdir(path),
+                            "size": os.path.getsize(path) if os.path.isfile(path) else 0,
+                            "modified": datetime.fromtimestamp(os.path.getmtime(path)).isoformat()
+                        })
+                    else:
+                        self.send_json({"success": False, "error": "Not found"}, 404)
+                except Exception as e:
+                    self.send_json({"success": False, "error": str(e)}, 500)
+            
+            else:
+                self.send_json({"success": False, "error": "Unknown files action"}, 400)
 
         else:
-            self.send_json({"success": False, "error": f"Unknown endpoint: {self.path}"}, 404)
+            self.send_json({"success": False, "error": "Not found"}, 404)
 
     # ============================================================
     # POST
@@ -978,467 +1165,960 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.check_auth():
             return
-        length = int(self.headers.get('Content-Length', 0))
-        req = json.loads(self.rfile.read(length).decode('utf-8')) if length else {}
-        data = load_data()
-        now = time.time()
+        
+        body = self.read_body()
 
-        # /api/stop — spec §4.3
-        if self.path == '/api/stop':
-            data["stop_flag"] = True
-            data["stop_reason"] = req.get('reason', 'User requested')
-            for a in data["running"]:
-                a["status"] = "cancelled"
-                data["history"].insert(0, a)
-            data["running"] = []
-            save_data(data)
-            return self.send_json({
-                "success": True,
-                "stop_flag": True,
-                "stop_reason": data["stop_reason"]
-            })
-
-        # /api/resume — spec §4.3
-        elif self.path == '/api/resume':
-            data["stop_flag"] = False
-            data["stop_reason"] = None
-            save_data(data)
-            return self.send_json({"success": True, "stop_flag": False})
-
-        # /api/nudge POST — spec §4.11
-        elif self.path == '/api/nudge':
-            if not req.get('message'):
-                return self.send_json({"success": False, "error": "message is required"}, 400)
-            nudge = {
-                "message": req['message'],
-                "timestamp": datetime.now().isoformat(),
-                "priority": req.get('priority', 'normal'),
-                "requires_ack": req.get('requires_ack', True),
-                "from": "human",
-                "acknowledged": False
-            }
-            data["nudge"] = nudge
-            save_data(data)
-            return self.send_json({
-                "success": True,
-                "nudge": nudge,
-                "message": "Nudge queued for next action"
-            })
-
-        # /api/nudge/ack — spec §4.11
-        elif self.path == '/api/nudge/ack':
-            data["nudge"] = None
-            save_data(data)
-            return self.send_json({"success": True, "message": "Nudge acknowledged"})
-
-        # /api/action — spec §4.3 combined endpoint
-        elif self.path == '/api/action':
-            if data["stop_flag"]:
-                return self.send_json({
-                    "success": False,
-                    "error": "Stop requested",
-                    "stop_flag": True,
-                    "stop_reason": data.get("stop_reason")
-                }, 403)
-
-            completed_activity = None
-            target = req.get('target', '')
-
-            # 1. Complete previous activity
-            if req.get('complete_id'):
-                for i, a in enumerate(data["running"]):
-                    if a["id"] == req["complete_id"]:
-                        duration_ms = int((now - a.get("started_ts", now)) * 1000)
-                        a.update({
-                            "status": "completed",
-                            "result": req.get('result', ''),
-                            "duration_ms": duration_ms
-                        })
-                        if req.get('error'):
-                            a["status"] = "error"
-                            a["error"] = req['error']
-                        if req.get('complete_content_size'):
-                            data["tokens"] += int(req['complete_content_size'] / 3.5)
-                        if req.get('complete_metadata'):
-                            a.setdefault("metadata", {}).update(req['complete_metadata'])
-                        completed_activity = dict(a)
-                        data["history"].insert(0, a)
-                        data["running"].pop(i)
-                        break
-
-            # 2. Hints for new target
-            hints = get_hints(data, target) if target else None
-
-            # 3. Identity & token tracking
-            meta = req.get('metadata', {})
-            agent_name = meta.get('agent_name')
-            action_tokens = max(1, estimate_tokens(
-                [req.get('action'), target], req.get('content_size', 0)
-            ))
-
-            if agent_name:
-                if not data.get("primary_agent"):
-                    data["primary_agent"] = agent_name
-                    data["startup_tokens"] = data["tokens"]
-                data["last_agent"] = agent_name
-                data["last_model"] = meta.get('model_name', data.get("last_model", "---"))
-                # session_tokens = primary agent only
-                if agent_name == data["primary_agent"]:
-                    data["tokens"] += action_tokens
-                data.setdefault("agent_tokens", {})
-                data["agent_tokens"][agent_name] = data["agent_tokens"].get(agent_name, 0) + action_tokens
-            else:
-                meta['agent_name'] = data.get("last_agent", "Unknown")
-                meta['model_name'] = data.get("last_model", "---")
-                data["tokens"] += action_tokens
-
-            # 4. Start new activity
-            aid = make_activity_id()
-            data["running"].append({
-                "id": aid,
-                "action": req.get('action'),
-                "target": target,
-                "details": req.get('details', ''),
-                "metadata": meta,
-                "status": "running",
-                "started": datetime.now().isoformat(),
-                "started_ts": now,
-                "priority": req.get('priority', 'medium')
-            })
-
-            orphans = check_orphans(data)
-            tok = get_token_summary(data)
-            save_data(data)
-            return self.send_json({
-                "success": True,
-                "activity_id": aid,
-                "completed": completed_activity,
-                "stop_flag": data["stop_flag"],
-                "session_tokens": tok["session_tokens"],
-                "context_window": CONTEXT_WINDOW,
-                "tokens_remaining": tok["tokens_remaining"],
-                "tokens_percent": tok["tokens_percent"],
-                "overflow_warning": tok["overflow_warning"],
-                "running_count": len(data["running"]),
-                "session": get_session_info(),
-                "hints": hints,
-                "nudge": data["nudge"],
-                "orphan_warning": {"count": len(orphans), "tasks": orphans} if orphans else None
-            })
-
-        # /api/start — spec §4.3
-        elif self.path == '/api/start':
-            if data["stop_flag"]:
-                return self.send_json({"success": False, "error": "Stop requested", "stop_flag": True}, 403)
-            target = req.get('target', '')
-            meta = req.get('metadata', {})
-            agent_name = meta.get('agent_name')
-            action_tokens = max(1, estimate_tokens(
-                [req.get('action'), target], req.get('content_size', 0)
-            ))
-            if agent_name:
-                if not data.get("primary_agent"):
-                    data["primary_agent"] = agent_name
-                data["last_agent"] = agent_name
-                data["last_model"] = meta.get('model_name', data.get("last_model", "---"))
-                if agent_name == data["primary_agent"]:
-                    data["tokens"] += action_tokens
-                data.setdefault("agent_tokens", {})
-                data["agent_tokens"][agent_name] = data["agent_tokens"].get(agent_name, 0) + action_tokens
-            else:
-                meta['agent_name'] = data.get("last_agent", "Unknown")
-                data["tokens"] += action_tokens
-            aid = make_activity_id()
-            data["running"].append({
-                "id": aid,
-                "action": req.get('action'),
-                "target": target,
-                "details": req.get('details', ''),
-                "metadata": meta,
-                "status": "running",
-                "started": datetime.now().isoformat(),
-                "started_ts": now,
-                "priority": req.get('priority', 'medium')
-            })
-            hints = get_hints(data, target) if target else None
-            orphans = check_orphans(data)
-            save_data(data)
-            return self.send_json({
-                "success": True,
-                "activity_id": aid,
-                "nudge": data["nudge"],
-                "hints": hints,
-                "orphan_warning": {"count": len(orphans), "tasks": orphans} if orphans else None
-            })
-
-        # /api/complete — spec §4.3
-        elif self.path == '/api/complete':
-            aid = req.get('activity_id')
-            for i, a in enumerate(data["running"]):
-                if a["id"] == aid:
-                    duration_ms = int((now - a.get("started_ts", now)) * 1000)
-                    a.update({"status": "completed", "result": req.get('result', ''), "duration_ms": duration_ms})
-                    if req.get('error'):
-                        a["status"] = "error"
-                        a["error"] = req['error']
-                    if req.get('content_size'):
-                        data["tokens"] += int(req['content_size'] / 3.5)
-                    if req.get('metadata'):
-                        a.setdefault("metadata", {}).update(req['metadata'])
-                    data["history"].insert(0, a)
-                    data["running"].pop(i)
-                    save_data(data)
-                    return self.send_json({
-                        "success": True,
-                        "activity_id": aid,
-                        "status": a["status"],
-                        "duration_ms": duration_ms
-                    })
-            data.setdefault("errors", []).append({
-                "timestamp": datetime.now().isoformat(),
-                "message": f"Activity not found: {aid}",
-                "type": "complete_error"
-            })
-            save_data(data)
-            return self.send_json({"success": False, "error": "Activity not found"}, 404)
-
-        # /api/activity/batch — spec §4.9
-        elif self.path == '/api/activity/batch':
-            operations = req.get('operations', [])
-            if len(operations) > 50:
-                return self.send_json({"success": False, "error": "Maximum 50 operations per batch"}, 400)
-            results = []
-            all_ok = True
-            for op in operations:
-                op_type = op.get('type')
-                try:
-                    if op_type == 'start':
-                        target = op.get('target', '')
-                        at = max(1, estimate_tokens([op.get('action'), target], op.get('content_size', 0)))
-                        data["tokens"] += at
-                        meta = op.get('metadata', {})
-                        an = meta.get('agent_name')
-                        if an:
-                            data.setdefault("agent_tokens", {})
-                            data["agent_tokens"][an] = data["agent_tokens"].get(an, 0) + at
-                        aid = make_activity_id()
-                        data["running"].append({
-                            "id": aid,
-                            "action": op.get('action'),
-                            "target": target,
-                            "details": op.get('details', ''),
-                            "metadata": meta,
-                            "status": "running",
-                            "started": datetime.now().isoformat(),
-                            "started_ts": now,
-                            "priority": op.get('priority', 'medium')
-                        })
-                        results.append({"success": True, "operation": "start", "activity_id": aid})
-                    elif op_type == 'complete':
-                        aid = op.get('activity_id')
-                        found = False
-                        for i, a in enumerate(data["running"]):
-                            if a["id"] == aid:
-                                dur = int((now - a.get("started_ts", now)) * 1000)
-                                a.update({"status": "completed", "result": op.get('result', ''), "duration_ms": dur})
-                                data["history"].insert(0, a)
-                                data["running"].pop(i)
-                                results.append({"success": True, "operation": "complete", "activity_id": aid})
-                                found = True
-                                break
-                        if not found:
-                            results.append({"success": False, "operation": "complete", "activity_id": aid, "error": "Activity not found"})
-                            all_ok = False
-                    else:
-                        results.append({"success": False, "operation": op_type, "error": "Unknown operation type"})
-                        all_ok = False
-                except Exception as e:
-                    results.append({"success": False, "operation": op_type, "error": str(e)})
-                    all_ok = False
-            tok = get_token_summary(data)
-            save_data(data)
-            return self.send_json({
-                "success": all_ok,
-                "results": results,
-                "count": len(results),
-                "session_tokens": tok["session_tokens"],
-                "context_window": CONTEXT_WINDOW,
-                "tokens_remaining": tok["tokens_remaining"]
-            })
-
-        # /api/todos/add — spec §4.4 (nested {todo: {...}})
-        elif self.path == '/api/todos/add':
-            # Support spec shape {todo: {...}} and legacy flat shape
-            todo_data = req.get('todo', {})
-            if not todo_data.get('content') and req.get('content'):
-                todo_data = req  # backward compat
-            if not todo_data.get('content'):
-                return self.send_json({"success": False, "error": "todo.content is required"}, 400)
-            data.setdefault("todos", [])
-            data["todos"].append({
-                "id": todo_data.get('id', make_activity_id()),
-                "content": todo_data['content'],
-                "status": todo_data.get('status', 'pending'),
-                "priority": todo_data.get('priority', 'medium'),
-                "created": datetime.now().isoformat(),
-                "metadata": {
-                    "agent_name": req.get('agent_name') or todo_data.get('agent_name'),
-                    "tool": req.get('tool'),
-                    "skill": req.get('skill')
-                }
-            })
-            save_data(data)
-            return self.send_json({"success": True, "count": len(data["todos"])})
-
-        # /api/todos/update — spec §4.4
-        elif self.path == '/api/todos/update':
-            data["todos"] = req.get('todos', [])
-            save_data(data)
-            return self.send_json({"success": True, "count": len(data["todos"])})
-
-        # /api/todos/toggle
-        elif self.path == '/api/todos/toggle':
-            tid = req.get('id')
-            for t in data.get("todos", []):
-                if t["id"] == tid:
-                    t["status"] = "completed" if t.get("status") != "completed" else "pending"
-                    save_data(data)
-                    return self.send_json({"success": True, "todo": t})
-            return self.send_json({"success": False, "error": "Todo not found"}, 404)
-
-        # /api/todos/clear — spec §4.4
-        elif self.path == '/api/todos/clear':
-            data["todos"] = [t for t in data.get("todos", []) if t.get('status') != 'completed']
-            save_data(data)
-            return self.send_json({"success": True, "count": len(data["todos"])})
-
-        # /api/notes/add — spec §4.6 (structured Note object)
-        elif self.path == '/api/notes/add':
-            if not req.get('content'):
-                return self.send_json({"success": False, "error": "content is required"}, 400)
-            data.setdefault("notes", [])
-            note = {
-                "id": make_activity_id(),
-                "timestamp": datetime.now().isoformat(),
-                "category": req.get('category', 'context'),
-                "content": req['content'][:500],
-                "importance": req.get('importance', 'normal')
-            }
-            data["notes"].append(note)
-            save_data(data)
-            return self.send_json({"success": True, "note": note})
-
-        # /api/notes/clear — spec §4.6
-        elif self.path == '/api/notes/clear':
-            data["notes"] = []
-            save_data(data)
-            return self.send_json({"success": True})
-
-        # /api/shell/add — spec §4.5
-        elif self.path == '/api/shell/add':
-            aid = make_activity_id()
-            cmd = req.get('command', '')
-            meta = req.get('metadata', {})
-            if req.get('agent_name') and not meta.get('agent_name'):
-                meta['agent_name'] = req['agent_name']
-            if req.get('tool') and not meta.get('tool'):
-                meta['tool'] = req['tool']
-            entry = {
-                "id": aid,
-                "command": cmd[:500],
-                "status": req.get('status', 'completed'),
-                "output_preview": req.get('output_preview', '')[:200],
-                "timestamp": datetime.now().isoformat(),
-                "metadata": meta
-            }
-            data.setdefault("shell_log", [])
-            data["shell_log"].append(entry)
-            data["shell_log"] = data["shell_log"][-50:]
-            data["history"].insert(0, {
-                "id": aid,
-                "action": "BASH",
-                "target": cmd,
-                "details": req.get('output_preview', '')[:200],
-                "status": req.get('status', 'completed'),
-                "started": datetime.now().isoformat(),
-                "started_ts": now,
-                "metadata": meta
-            })
-            save_data(data)
-            return self.send_json({"success": True, "activity_id": aid})
-
-        # /api/shell/clear — spec §4.5
-        elif self.path == '/api/shell/clear':
-            data["shell_log"] = []
-            save_data(data)
-            return self.send_json({"success": True})
-
-        # /api/clear_history — spec §4.3
-        elif self.path == '/api/clear_history':
-            data["history"] = []
-            save_data(data)
-            return self.send_json({"success": True})
-
-        # /api/reset and /api/reset_session — spec §4.3
-        elif self.path in ('/api/reset', '/api/reset_session'):
-            save_data(reset_state())
-            return self.send_json({"success": True})
-
-        # /api/session/refresh — spec §4.10
-        elif self.path == '/api/session/refresh':
-            return self.send_json({"success": True, "session": get_session_info()})
-
-        # /api/restart — spec §4.10
-        elif self.path == '/api/restart':
-            self.send_json({"success": True, "message": "Restarting..."})
-            threading.Timer(0.5, lambda: os.execv(__file__, ['python3', __file__])).start()
+        # JSON-RPC 2.0 endpoints (1.0.4)
+        if self.path in ['/jsonrpc', '/a2a', '/api/jsonrpc']:
+            self._handle_jsonrpc(body)
             return
 
-        # /api/shutdown — spec §4.3 (graceful: export → cancel → nudge → delay → kill)
-        elif self.path == '/api/shutdown':
-            reason = req.get('reason', 'Session ended by user')
-            do_export = req.get('export_summary', True)
-            summary_path = None
-            if do_export:
-                try:
-                    summary_path, _ = write_summary_file(data)
-                except:
-                    pass
-            cancelled = len(data["running"])
-            for a in data["running"]:
+        # /api/action — combined endpoint
+        elif self.path == '/api/action':
+            d = load_data()
+            if d["stop_flag"]:
+                self.send_json({"success": False, "error": "Stop requested"}, 403)
+                return
+
+            # Complete previous if provided
+            if body.get("complete_id"):
+                for i, a in enumerate(d["running"]):
+                    if a["id"] == body["complete_id"]:
+                        a["status"] = "error" if body.get("error") else "completed"
+                        a["completed"] = datetime.now().isoformat()
+                        a["result"] = (body.get("result") or "")[:500]
+                        a["error"] = str(body.get("error", ""))[:200] if body.get("error") else None
+                        output_tokens = estimate_tokens([a.get("result", ""), str(body.get("error", ""))])
+                        if body.get("complete_content_size"):
+                            output_tokens += int(body["complete_content_size"] / 3.5)
+                        a["tokens_out"] = output_tokens
+                        try:
+                            started = datetime.fromisoformat(a["started"])
+                            completed = datetime.fromisoformat(a["completed"])
+                            a["duration_ms"] = int((completed - started).total_seconds() * 1000)
+                        except:
+                            pass
+                        d["history"].insert(0, d["running"].pop(i))
+                        if len(d["history"]) > 100:
+                            d["history"] = d["history"][:100]
+                        
+                        # Update agent tokens
+                        m = a.get("metadata", {})
+                        agent_name = m.get("agent_name", "Unknown")
+                        if agent_name not in d.get("agent_tokens", {}):
+                            d["agent_tokens"][agent_name] = 0
+                        d["agent_tokens"][agent_name] += output_tokens
+                        if agent_name == d.get("primary_agent"):
+                            d["tokens"] = d.get("tokens", 0) + output_tokens
+                        break
+
+            # Start new activity
+            action = body.get("action", "UNKNOWN")
+            target = body.get("target", "")
+            details = body.get("details", "")
+            content_size = body.get("content_size", 0)
+            priority = body.get("priority", "medium")
+            metadata = body.get("metadata", {})
+
+            started_ts = time.time()
+            started = datetime.now().isoformat()
+            activity_id = make_activity_id()
+            
+            input_tokens = estimate_tokens([action, target, details], content_size)
+            
+            activity = {
+                "id": activity_id,
+                "action": action,
+                "target": target,
+                "details": details,
+                "status": "running",
+                "started": started,
+                "started_ts": started_ts,
+                "tokens_in": input_tokens,
+                "priority": priority,
+            }
+            if metadata:
+                activity["metadata"] = metadata
+
+            d["running"].append(activity)
+            
+            # Update primary agent tracking
+            agent_name = metadata.get("agent_name", "Unknown")
+            if not d.get("primary_agent"):
+                d["primary_agent"] = agent_name
+            
+            # Update agent_tokens
+            if agent_name not in d.get("agent_tokens", {}):
+                d["agent_tokens"][agent_name] = 0
+            d["agent_tokens"][agent_name] += input_tokens
+            d["tokens"] = d.get("tokens", 0) + input_tokens
+            
+            d["last_agent"] = agent_name
+            if metadata.get("model_name"):
+                d["last_model"] = metadata["model_name"]
+
+            save_data(d)
+            
+            # Get hints with A2A info
+            hints = get_hints(d, target, agent_name)
+            orphans = check_orphans(d)
+            
+            self.send_json({
+                "success": True,
+                "activity_id": activity_id,
+                "stop_flag": d["stop_flag"],
+                "session_tokens": d["tokens"],
+                "context_window": CONTEXT_WINDOW,
+                "tokens_remaining": CONTEXT_WINDOW - d["tokens"],
+                "tokens_percent": round(d["tokens"] / CONTEXT_WINDOW * 100, 2),
+                "session": get_session_info(),
+                "running_count": len(d["running"]),
+                "hints": hints,
+                "nudge": d.get("nudge"),
+                "orphan_warning": {"count": len(orphans), "tasks": orphans} if orphans else None
+            })
+
+        # /api/start
+        elif self.path == '/api/start':
+            d = load_data()
+            if d["stop_flag"]:
+                self.send_json({"success": False, "error": "Stop requested"}, 403)
+                return
+
+            action = body.get("action", "UNKNOWN")
+            target = body.get("target", "")
+            details = body.get("details", "")
+            content_size = body.get("content_size", 0)
+            priority = body.get("priority", "medium")
+            metadata = body.get("metadata", {})
+
+            started_ts = time.time()
+            started = datetime.now().isoformat()
+            activity_id = make_activity_id()
+            input_tokens = estimate_tokens([action, target, details], content_size)
+
+            activity = {
+                "id": activity_id,
+                "action": action,
+                "target": target,
+                "details": details,
+                "status": "running",
+                "started": started,
+                "started_ts": started_ts,
+                "tokens_in": input_tokens,
+                "priority": priority,
+            }
+            if metadata:
+                activity["metadata"] = metadata
+
+            d["running"].append(activity)
+            
+            agent_name = metadata.get("agent_name", "Unknown")
+            if not d.get("primary_agent"):
+                d["primary_agent"] = agent_name
+            
+            if agent_name not in d.get("agent_tokens", {}):
+                d["agent_tokens"][agent_name] = 0
+            d["agent_tokens"][agent_name] += input_tokens
+            d["tokens"] = d.get("tokens", 0) + input_tokens
+            d["last_agent"] = agent_name
+            if metadata.get("model_name"):
+                d["last_model"] = metadata["model_name"]
+
+            save_data(d)
+            
+            hints = get_hints(d, target, agent_name)
+            self.send_json({
+                "success": True,
+                "activity_id": activity_id,
+                "session_tokens": d["tokens"],
+                "hints": hints
+            })
+
+        # /api/complete
+        elif self.path == '/api/complete':
+            d = load_data()
+            aid = body.get("activity_id")
+            result = body.get("result", "")
+            error = body.get("error")
+            content_size = body.get("content_size", 0)
+
+            for i, a in enumerate(d["running"]):
+                if a["id"] == aid:
+                    a["status"] = "error" if error else "completed"
+                    a["completed"] = datetime.now().isoformat()
+                    a["result"] = result[:500]
+                    a["error"] = str(error)[:200] if error else None
+                    
+                    output_tokens = estimate_tokens([result, str(error) if error else ""])
+                    if content_size > 0:
+                        output_tokens += int(content_size / 3.5)
+                    a["tokens_out"] = output_tokens
+
+                    try:
+                        started = datetime.fromisoformat(a["started"])
+                        completed = datetime.fromisoformat(a["completed"])
+                        a["duration_ms"] = int((completed - started).total_seconds() * 1000)
+                    except:
+                        pass
+
+                    d["history"].insert(0, d["running"].pop(i))
+                    if len(d["history"]) > 100:
+                        d["history"] = d["history"][:100]
+
+                    # Update agent tokens
+                    m = a.get("metadata", {})
+                    agent_name = m.get("agent_name", "Unknown")
+                    if agent_name not in d.get("agent_tokens", {}):
+                        d["agent_tokens"][agent_name] = 0
+                    d["agent_tokens"][agent_name] += output_tokens
+                    if agent_name == d.get("primary_agent"):
+                        d["tokens"] = d.get("tokens", 0) + output_tokens
+
+                    save_data(d)
+                    self.send_json({
+                        "success": True,
+                        "activity": a,
+                        "session_tokens": d["tokens"],
+                        "hints": get_hints(d, "", agent_name)
+                    })
+                    return
+
+            self.send_json({"success": False, "error": "Activity not found"}, 404)
+
+        # /api/activity/batch — v1.0.3
+        elif self.path == '/api/activity/batch':
+            d = load_data()
+            ops = body.get("operations", [])[:50]  # Max 50
+            results = []
+            
+            for op in ops:
+                op_type = op.get("type")
+                if op_type == "start":
+                    if d["stop_flag"]:
+                        results.append({"success": False, "error": "Stop requested"})
+                        continue
+                    action = op.get("action", "UNKNOWN")
+                    target = op.get("target", "")
+                    details = op.get("details", "")
+                    content_size = op.get("content_size", 0)
+                    metadata = op.get("metadata", {})
+                    started_ts = time.time()
+                    started = datetime.now().isoformat()
+                    activity_id = make_activity_id()
+                    input_tokens = estimate_tokens([action, target, details], content_size)
+                    activity = {
+                        "id": activity_id,
+                        "action": action, "target": target, "details": details,
+                        "status": "running", "started": started, "started_ts": started_ts,
+                        "tokens_in": input_tokens, "priority": op.get("priority", "medium")
+                    }
+                    if metadata:
+                        activity["metadata"] = metadata
+                    d["running"].append(activity)
+                    
+                    agent_name = metadata.get("agent_name", "Unknown")
+                    if not d.get("primary_agent"):
+                        d["primary_agent"] = agent_name
+                    if agent_name not in d.get("agent_tokens", {}):
+                        d["agent_tokens"][agent_name] = 0
+                    d["agent_tokens"][agent_name] += input_tokens
+                    d["tokens"] = d.get("tokens", 0) + input_tokens
+                    
+                    results.append({"success": True, "activity_id": activity_id})
+                
+                elif op_type == "complete":
+                    aid = op.get("activity_id")
+                    for i, a in enumerate(d["running"]):
+                        if a["id"] == aid:
+                            a["status"] = "error" if op.get("error") else "completed"
+                            a["completed"] = datetime.now().isoformat()
+                            a["result"] = (op.get("result") or "")[:500]
+                            a["error"] = str(op.get("error", ""))[:200] if op.get("error") else None
+                            output_tokens = estimate_tokens([a.get("result", ""), str(op.get("error", ""))])
+                            a["tokens_out"] = output_tokens
+                            try:
+                                started = datetime.fromisoformat(a["started"])
+                                completed = datetime.fromisoformat(a["completed"])
+                                a["duration_ms"] = int((completed - started).total_seconds() * 1000)
+                            except:
+                                pass
+                            d["history"].insert(0, d["running"].pop(i))
+                            
+                            m = a.get("metadata", {})
+                            agent_name = m.get("agent_name", "Unknown")
+                            if agent_name not in d.get("agent_tokens", {}):
+                                d["agent_tokens"][agent_name] = 0
+                            d["agent_tokens"][agent_name] += output_tokens
+                            if agent_name == d.get("primary_agent"):
+                                d["tokens"] = d.get("tokens", 0) + output_tokens
+                            
+                            results.append({"success": True, "activity_id": aid})
+                            break
+                    else:
+                        results.append({"success": False, "error": "Activity not found", "activity_id": aid})
+
+            save_data(d)
+            self.send_json({"success": True, "results": results, "session_tokens": d["tokens"]})
+
+        # /api/stop
+        elif self.path == '/api/stop':
+            d = load_data()
+            d["stop_flag"] = True
+            d["stop_reason"] = body.get("reason", "User requested")
+            # Mark all running as cancelled
+            for a in d["running"]:
                 a["status"] = "cancelled"
-                data["history"].insert(0, a)
-            data["running"] = []
-            data["nudge"] = {
-                "message": "SESSION ENDING: The human has ended this session. Wrap up any final thoughts, then acknowledge this message. The server will stop shortly.",
+                a["completed"] = datetime.now().isoformat()
+            d["history"] = d["running"] + d["history"]
+            d["running"] = []
+            save_data(d)
+            self.send_json({"success": True, "message": "STOP ALL activated", "reason": d["stop_reason"]})
+
+        # /api/resume
+        elif self.path == '/api/resume':
+            d = load_data()
+            d["stop_flag"] = False
+            d["stop_reason"] = None
+            save_data(d)
+            self.send_json({"success": True, "message": "Operations resumed"})
+
+        # /api/shutdown
+        elif self.path == '/api/shutdown':
+            d = load_data()
+            reason = body.get("reason", "Session ended by user")
+            if body.get("export_summary", True):
+                try:
+                    filepath, _ = write_summary_file(d)
+                except:
+                    filepath = None
+            else:
+                filepath = None
+            # Set shutdown nudge
+            d["nudge"] = {
+                "message": f"SESSION ENDING: {reason}. Wrap up any final thoughts.",
                 "priority": "urgent",
                 "requires_ack": True,
                 "from": "system",
                 "type": "shutdown",
-                "timestamp": datetime.now().isoformat(),
-                "acknowledged": False
+                "timestamp": datetime.now().isoformat()
             }
-            save_data(data)
+            save_data(d)
             self.send_json({
                 "success": True,
-                "message": "Session ending - agent has been notified",
-                "summary_exported": do_export,
-                "summary_path": summary_path,
-                "cancelled_activities": cancelled,
-                "note": "Server will stop in 2 seconds. Agent should acknowledge the shutdown nudge."
+                "message": "Session ending",
+                "summary_exported": bool(filepath),
+                "summary_path": filepath,
+                "note": "Server will stop shortly"
             })
-            threading.Timer(2.0, lambda: os.kill(os.getpid(), signal.SIGINT)).start()
-            return
+            # Schedule shutdown
+            def do_shutdown():
+                time.sleep(2)
+                os._exit(0)
+            threading.Thread(target=do_shutdown, daemon=True).start()
+
+        # /api/restart
+        elif self.path == '/api/restart':
+            self.send_json({"success": True, "message": "Restarting server..."})
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+
+        # /api/clear_history
+        elif self.path == '/api/clear_history':
+            d = load_data()
+            cleared = len(d["history"])
+            d["history"] = []
+            save_data(d)
+            self.send_json({"success": True, "message": f"Cleared {cleared} activities"})
+
+        # /api/reset_session
+        elif self.path == '/api/reset_session':
+            d = load_data()
+            old_tokens = d["tokens"]
+            d["tokens"] = d.get("startup_tokens", 0)
+            d["history"] = []
+            d["running"] = []
+            d["todos"] = []
+            d["stop_flag"] = False
+            d["stop_reason"] = None
+            d["primary_agent"] = None
+            d["agent_tokens"] = {}
+            d["session_start"] = time.time()
+            save_data(d)
+            self.send_json({"success": True, "message": "Session reset", "tokens_cleared": old_tokens})
+
+        # /api/reset — 1.0.4: Full reset including agents and A2A
+        elif self.path == '/api/reset':
+            d = load_data()
+            stats = {
+                "history_cleared": len(d.get("history", [])),
+                "shell_cleared": len(d.get("shell_log", [])),
+                "todos_cleared": len(d.get("todos", [])),
+                "agents_cleared": len(d.get("agents", {})),
+                "a2a_cleared": len(d.get("a2a_messages", [])),
+                "tokens_reset": d.get("tokens", 0)
+            }
+            d.update(reset_state())
+            save_data(d)
+            self.send_json({
+                "success": True,
+                "message": "Session reset complete",
+                "stats": stats
+            })
+
+        # /api/nudge
+        elif self.path == '/api/nudge':
+            d = load_data()
+            d["nudge"] = {
+                "message": body.get("message", ""),
+                "priority": body.get("priority", "normal"),
+                "requires_ack": body.get("requires_ack", False),
+                "from": "human",
+                "timestamp": datetime.now().isoformat()
+            }
+            save_data(d)
+            self.send_json({"success": True, "message": "Nudge set", "nudge": d["nudge"]})
+
+        # /api/nudge/ack
+        elif self.path == '/api/nudge/ack':
+            d = load_data()
+            if d.get("nudge"):
+                d["nudge"]["acknowledged"] = True
+                save_data(d)
+                self.send_json({"success": True, "message": "Nudge acknowledged"})
+            else:
+                self.send_json({"success": True, "message": "No nudge to acknowledge"})
+
+        # /api/todos/update
+        elif self.path == '/api/todos/update':
+            d = load_data()
+            todos = body.get("todos", [])
+            for t in todos:
+                if "id" not in t:
+                    t["id"] = make_activity_id()
+                if "created" not in t:
+                    t["created"] = datetime.now().isoformat()
+                if "status" not in t:
+                    t["status"] = "pending"
+                if "priority" not in t:
+                    t["priority"] = "medium"
+            d["todos"] = todos
+            save_data(d)
+            self.send_json({"success": True, "todos": d["todos"]})
+
+        # /api/todos/add
+        elif self.path == '/api/todos/add':
+            d = load_data()
+            todo = body.get("todo", {})
+            todo["id"] = make_activity_id()
+            todo["created"] = datetime.now().isoformat()
+            todo.setdefault("status", "pending")
+            todo.setdefault("priority", "medium")
+            if body.get("agent_name") or body.get("tool") or body.get("skill"):
+                todo["metadata"] = {
+                    "agent_name": body.get("agent_name"),
+                    "tool": body.get("tool"),
+                    "skill": body.get("skill")
+                }
+            d["todos"].append(todo)
+            save_data(d)
+            self.send_json({"success": True, "todo": todo})
+
+        # /api/todos/toggle
+        elif self.path == '/api/todos/toggle':
+            d = load_data()
+            tid = body.get("id")
+            for t in d["todos"]:
+                if t["id"] == tid:
+                    t["status"] = "completed" if t.get("status") != "completed" else "pending"
+                    save_data(d)
+                    self.send_json({"success": True, "todo": t})
+                    return
+            self.send_json({"success": False, "error": "Todo not found"}, 404)
+
+        # /api/todos/clear
+        elif self.path == '/api/todos/clear':
+            d = load_data()
+            before = len(d["todos"])
+            d["todos"] = [t for t in d["todos"] if t.get("status") != "completed"]
+            save_data(d)
+            self.send_json({"success": True, "cleared": before - len(d["todos"])})
+
+        # /api/notes/add
+        elif self.path == '/api/notes/add':
+            d = load_data()
+            note = {
+                "id": make_activity_id(),
+                "timestamp": datetime.now().isoformat(),
+                "category": body.get("category", "context"),
+                "content": (body.get("content", ""))[:500],
+                "importance": body.get("importance", "normal")
+            }
+            d["notes"].append(note)
+            save_data(d)
+            self.send_json({"success": True, "note": note})
+
+        # /api/notes/clear
+        elif self.path == '/api/notes/clear':
+            d = load_data()
+            cleared = len(d["notes"])
+            d["notes"] = []
+            save_data(d)
+            self.send_json({"success": True, "cleared": cleared})
+
+        # /api/shell/add
+        elif self.path == '/api/shell/add':
+            d = load_data()
+            entry = {
+                "id": make_activity_id(),
+                "command": (body.get("command", ""))[:500],
+                "timestamp": datetime.now().isoformat(),
+                "status": body.get("status", "completed"),
+                "output_preview": (body.get("output_preview", ""))[:200]
+            }
+            if body.get("agent_name") or body.get("tool"):
+                entry["metadata"] = {"agent_name": body.get("agent_name"), "tool": body.get("tool")}
+            if body.get("metadata"):
+                entry["metadata"] = body["metadata"]
+            d["shell_log"].append(entry)
+            if len(d["shell_log"]) > 200:
+                d["shell_log"] = d["shell_log"][-200:]
+            save_data(d)
+            self.send_json({"success": True, "entry": entry})
+
+        # /api/shell/clear
+        elif self.path == '/api/shell/clear':
+            d = load_data()
+            cleared = len(d["shell_log"])
+            d["shell_log"] = []
+            save_data(d)
+            self.send_json({"success": True, "cleared": cleared})
+
+        # /api/session/refresh
+        elif self.path == '/api/session/refresh':
+            d = load_data()
+            d["session_start"] = time.time()
+            save_data(d)
+            self.send_json({"success": True, "session": get_session_info()})
+
+        # /api/agents/register — 1.0.4
+        elif self.path == '/api/agents/register':
+            d = load_data()
+            agent_name = body.get("agent_name", "Unknown")
+            capabilities = body.get("capabilities", [])
+            model_name = body.get("model_name")
+            endpoint = body.get("endpoint")
+            skills = body.get("skills", [])
+            
+            now = datetime.now().isoformat()
+            
+            if agent_name in d.get("agents", {}):
+                # Update existing
+                d["agents"][agent_name].update({
+                    "capabilities": capabilities,
+                    "model_name": model_name,
+                    "endpoint": endpoint,
+                    "last_seen": now,
+                    "status": "online"
+                })
+            else:
+                # Register new
+                d.setdefault("agents", {})[agent_name] = {
+                    "name": agent_name,
+                    "capabilities": capabilities,
+                    "model_name": model_name,
+                    "endpoint": endpoint,
+                    "registered_at": now,
+                    "last_seen": now,
+                    "status": "online",
+                    "tokens_used": 0,
+                    "skills": skills
+                }
+            
+            # Update agent_skills
+            if skills:
+                d.setdefault("agent_skills", {})[agent_name] = skills
+            
+            # Update last_agent
+            d["last_agent"] = agent_name
+            if model_name:
+                d["last_model"] = model_name
+            
+            save_data(d)
+            self.send_json({
+                "success": True,
+                "agent": d["agents"][agent_name],
+                "message": f"Agent '{agent_name}' registered"
+            })
+
+        # /api/agents/unregister — 1.0.4
+        elif self.path == '/api/agents/unregister':
+            d = load_data()
+            agent_name = body.get("agent_name")
+            
+            if agent_name in d.get("agents", {}):
+                del d["agents"][agent_name]
+                if agent_name in d.get("agent_skills", {}):
+                    del d["agent_skills"][agent_name]
+                save_data(d)
+                self.send_json({
+                    "success": True,
+                    "message": f"Agent '{agent_name}' unregistered"
+                })
+            else:
+                self.send_json({
+                    "success": False,
+                    "error": f"Agent '{agent_name}' not found"
+                }, 404)
+
+        # /api/a2a/send — 1.0.4
+        elif self.path == '/api/a2a/send':
+            d = load_data()
+            
+            from_agent = body.get("from_agent", "Unknown")
+            to_agent = body.get("to_agent")
+            msg_type = body.get("type", "notification")
+            action = body.get("action")
+            payload = body.get("payload", {})
+            priority = body.get("priority", "normal")
+            ttl = body.get("ttl", 3600)
+            reply_to = body.get("reply_to")
+            
+            if not to_agent:
+                self.send_json({"success": False, "error": "'to_agent' is required"}, 400)
+                return
+            
+            # Create message
+            msg = create_a2a_message(
+                from_agent=from_agent,
+                to_agent=to_agent,
+                msg_type=msg_type,
+                action=action,
+                payload=payload,
+                priority=priority,
+                ttl=ttl,
+                reply_to=reply_to
+            )
+            
+            # Add to queue
+            d.setdefault("a2a_messages", []).insert(0, msg)
+            
+            # Limit queue size
+            if len(d["a2a_messages"]) > 500:
+                d["a2a_messages"] = d["a2a_messages"][:500]
+            
+            # Create activity for A2A
+            activity = {
+                "id": msg["id"],
+                "action": "A2A",
+                "target": f"{from_agent} → {to_agent}",
+                "details": f"{msg_type}: {action or 'N/A'}",
+                "status": "completed",
+                "started": msg["created_at"],
+                "completed": msg["created_at"],
+                "tokens_in": 0,
+                "tokens_out": 0,
+                "metadata": {
+                    "from_agent": from_agent,
+                    "to_agent": to_agent,
+                    "msg_type": msg_type
+                }
+            }
+            d["history"].insert(0, activity)
+            if len(d["history"]) > 100:
+                d["history"] = d["history"][:100]
+            
+            save_data(d)
+            
+            # Get A2A hints for recipient
+            a2a_hints = get_a2a_hints(d, to_agent)
+            
+            self.send_json({
+                "success": True,
+                "message_id": msg["id"],
+                "hints": a2a_hints
+            })
 
         else:
-            return self.send_json({"success": False, "error": f"Unknown endpoint: {self.path}"}, 404)
+            self.send_json({"success": False, "error": "Not found"}, 404)
+
+    # ============================================================
+    # JSON-RPC 2.0 Handler (1.0.4)
+    # ============================================================
+    def _handle_jsonrpc(self, body):
+        """Handle JSON-RPC 2.0 requests."""
+        req_id = body.get("id")
+        method = body.get("method", "")
+        params = body.get("params", {})
+        
+        def send_result(result):
+            self.send_json({"jsonrpc": "2.0", "result": result, "id": req_id})
+        
+        def send_error(code, message):
+            self.send_json({"jsonrpc": "2.0", "error": {"code": code, "message": message}, "id": req_id})
+        
+        d = load_data()
+        
+        # A2A Protocol Methods
+        if method == "SendMessage":
+            to_agent = params.get("to_agent")
+            if not to_agent:
+                return send_error(JSONRPC_INVALID_PARAMS, "'to_agent' is required")
+            
+            msg = create_a2a_message(
+                from_agent=params.get("from_agent", "Unknown"),
+                to_agent=to_agent,
+                msg_type=params.get("type", "request"),
+                action=params.get("action"),
+                payload=params.get("payload", {}),
+                priority=params.get("priority", "normal"),
+                ttl=params.get("ttl", 3600),
+                reply_to=params.get("reply_to")
+            )
+            
+            d.setdefault("a2a_messages", []).insert(0, msg)
+            save_data(d)
+            
+            # Return A2A Task format
+            send_result({
+                "id": msg["id"],
+                "contextId": params.get("contextId"),
+                "status": {"state": "COMPLETED", "timestamp": msg["created_at"]},
+                "history": [],
+                "artifacts": [],
+                "metadata": {
+                    "action": "A2A",
+                    "target": f"{msg['from_agent']} → {msg['to_agent']}",
+                    "tokens_in": 0,
+                    "tokens_out": 0
+                }
+            })
+        
+        elif method == "GetTask":
+            task_id = params.get("id")
+            if not task_id:
+                return send_error(JSONRPC_INVALID_PARAMS, "'id' is required")
+            
+            for a in d.get("running", []) + d.get("history", []):
+                if a["id"] == task_id:
+                    state = "RUNNING" if a["status"] == "running" else \
+                           "COMPLETED" if a["status"] == "completed" else \
+                           "FAILED" if a["status"] == "error" else "CANCELED"
+                    return send_result({
+                        "id": a["id"],
+                        "status": {"state": state, "timestamp": a.get("started", "")},
+                        "metadata": {
+                            "action": a.get("action"),
+                            "target": a.get("target"),
+                            "tokens_in": a.get("tokens_in", 0),
+                            "tokens_out": a.get("tokens_out", 0),
+                            "duration_ms": a.get("duration_ms")
+                        }
+                    })
+            send_error(JSONRPC_TASK_NOT_FOUND, "Task not found")
+        
+        elif method == "CancelTask":
+            task_id = params.get("id")
+            if not task_id:
+                return send_error(JSONRPC_INVALID_PARAMS, "'id' is required")
+            
+            for a in d.get("running", []):
+                if a["id"] == task_id:
+                    a["status"] = "cancelled"
+                    a["completed"] = datetime.now().isoformat()
+                    d["history"].insert(0, a)
+                    d["running"] = [x for x in d["running"] if x["id"] != task_id]
+                    save_data(d)
+                    return send_result({
+                        "id": task_id,
+                        "status": {"state": "CANCELED", "timestamp": a["completed"]}
+                    })
+            send_error(JSONRPC_TASK_NOT_RUNNING, "Task not running")
+        
+        elif method == "GetAgents":
+            agents = d.get("agents", {})
+            agent_list = []
+            for name in agents:
+                agent = get_agent_status(d, name)
+                if agent:
+                    agent_list.append(agent)
+            send_result({"agents": agent_list, "count": len(agent_list), "primary_agent": d.get("primary_agent")})
+        
+        elif method == "RegisterAgent":
+            agent_name = params.get("agent_name", "Unknown")
+            now = datetime.now().isoformat()
+            
+            if agent_name in d.get("agents", {}):
+                d["agents"][agent_name].update({
+                    "capabilities": params.get("capabilities", []),
+                    "model_name": params.get("model_name"),
+                    "endpoint": params.get("endpoint"),
+                    "last_seen": now,
+                    "status": "online"
+                })
+            else:
+                d.setdefault("agents", {})[agent_name] = {
+                    "name": agent_name,
+                    "capabilities": params.get("capabilities", []),
+                    "model_name": params.get("model_name"),
+                    "endpoint": params.get("endpoint"),
+                    "registered_at": now,
+                    "last_seen": now,
+                    "status": "online",
+                    "tokens_used": 0,
+                    "skills": params.get("skills", [])
+                }
+            
+            d["last_agent"] = agent_name
+            if params.get("model_name"):
+                d["last_model"] = params["model_name"]
+            
+            save_data(d)
+            send_result({"agent": d["agents"][agent_name], "message": f"Agent '{agent_name}' registered"})
+        
+        # ACP-native Methods
+        elif method == "activity/start":
+            if d["stop_flag"]:
+                return send_error(JSONRPC_TASK_NOT_FOUND, "Stop requested")
+            
+            action = params.get("action", "UNKNOWN")
+            target = params.get("target", "")
+            metadata = params.get("metadata", {})
+            
+            started_ts = time.time()
+            started = datetime.now().isoformat()
+            activity_id = make_activity_id()
+            input_tokens = estimate_tokens([action, target, params.get("details", "")], params.get("content_size", 0))
+            
+            activity = {
+                "id": activity_id,
+                "action": action, "target": target,
+                "details": params.get("details", ""),
+                "status": "running", "started": started, "started_ts": started_ts,
+                "tokens_in": input_tokens,
+                "priority": params.get("priority", "medium"),
+                "metadata": metadata
+            }
+            
+            d["running"].append(activity)
+            agent_name = metadata.get("agent_name", "Unknown")
+            if not d.get("primary_agent"):
+                d["primary_agent"] = agent_name
+            if agent_name not in d.get("agent_tokens", {}):
+                d["agent_tokens"][agent_name] = 0
+            d["agent_tokens"][agent_name] += input_tokens
+            d["tokens"] = d.get("tokens", 0) + input_tokens
+            
+            save_data(d)
+            send_result({
+                "activity_id": activity_id,
+                "hints": get_hints(d, target, agent_name)
+            })
+        
+        elif method == "activity/complete":
+            activity_id = params.get("activity_id")
+            if not activity_id:
+                return send_error(JSONRPC_INVALID_PARAMS, "'activity_id' is required")
+            
+            for i, a in enumerate(d.get("running", [])):
+                if a["id"] == activity_id:
+                    a["status"] = "error" if params.get("error") else "completed"
+                    a["completed"] = datetime.now().isoformat()
+                    a["result"] = (params.get("result") or "")[:500]
+                    a["error"] = str(params.get("error", ""))[:200] if params.get("error") else None
+                    
+                    output_tokens = estimate_tokens([a.get("result", ""), str(params.get("error", ""))])
+                    a["tokens_out"] = output_tokens
+                    
+                    try:
+                        started = datetime.fromisoformat(a["started"])
+                        completed = datetime.fromisoformat(a["completed"])
+                        a["duration_ms"] = int((completed - started).total_seconds() * 1000)
+                    except:
+                        pass
+                    
+                    d["history"].insert(0, d["running"].pop(i))
+                    
+                    m = a.get("metadata", {})
+                    agent_name = m.get("agent_name", "Unknown")
+                    if agent_name not in d.get("agent_tokens", {}):
+                        d["agent_tokens"][agent_name] = 0
+                    d["agent_tokens"][agent_name] += output_tokens
+                    if agent_name == d.get("primary_agent"):
+                        d["tokens"] = d.get("tokens", 0) + output_tokens
+                    
+                    save_data(d)
+                    return send_result({"activity": a})
+            
+            send_error(JSONRPC_TASK_NOT_FOUND, "Activity not found")
+        
+        elif method == "todos/get":
+            send_result({"todos": d.get("todos", [])})
+        
+        elif method == "todos/update":
+            todos = params.get("todos", [])
+            for t in todos:
+                if "id" not in t:
+                    t["id"] = make_activity_id()
+                t.setdefault("created", datetime.now().isoformat())
+                t.setdefault("status", "pending")
+                t.setdefault("priority", "medium")
+            d["todos"] = todos
+            save_data(d)
+            send_result({"success": True})
+        
+        elif method == "status/get":
+            tok = get_token_summary(d)
+            send_result({
+                "success": True,
+                "stop_flag": d["stop_flag"],
+                "session_tokens": tok["session_tokens"],
+                "context_window": CONTEXT_WINDOW,
+                "tokens_remaining": tok["tokens_remaining"],
+                "tokens_percent": tok["tokens_percent"],
+                "primary_agent": d.get("primary_agent"),
+                "agent_tokens": d.get("agent_tokens", {}),
+                "session": get_session_info()
+            })
+        
+        elif method == "nudge/set":
+            d["nudge"] = {
+                "message": params.get("message", ""),
+                "priority": params.get("priority", "normal"),
+                "requires_ack": params.get("requires_ack", False),
+                "from": "system",
+                "timestamp": datetime.now().isoformat()
+            }
+            save_data(d)
+            send_result({"success": True, "message": "Nudge set"})
+        
+        elif method == "stop/set":
+            d["stop_flag"] = True
+            d["stop_reason"] = params.get("reason", "User requested")
+            save_data(d)
+            send_result({"success": True, "message": "Stop flag set"})
+        
+        elif method == "session/reset":
+            stats = {
+                "history_cleared": len(d.get("history", [])),
+                "agents_cleared": len(d.get("agents", {})),
+                "a2a_cleared": len(d.get("a2a_messages", [])),
+                "tokens_reset": d.get("tokens", 0)
+            }
+            d.update(reset_state())
+            save_data(d)
+            send_result({"success": True, "message": "Session reset", "stats": stats})
+        
+        else:
+            send_error(JSONRPC_METHOD_NOT_FOUND, f"Method not found: {method}")
 
 
+# --- MAIN ---
 if __name__ == "__main__":
-    print(f"🤖 ACP Minimal v1.0.3 active on port {PORT}")
+    print(f"🤖 ACP Minimal v1.0.4 starting on port {PORT}")
     print(f"   Auth: {AUTH_USER} / {AUTH_PASS}")
-    print(f"   Context Window: {CONTEXT_WINDOW:,} tokens")
-    print(f"   Session Timeout: {SESSION_TIMEOUT}s | Orphan Timeout: {ORPHAN_TIMEOUT}s")
-    print(f"   Data File: {DATA_FILE} | Summary File: {SUMMARY_FILE}")
-    print(f"   Base Directory: {os.environ.get('ACP_BASE_DIR', '.')}")
-    HTTPServer(('0.0.0.0', PORT), ACPMinimalHandler).serve_forever()
+    print(f"   Features: Activity Monitor + File Manager + A2A Messaging + JSON-RPC")
+    server = HTTPServer(('0.0.0.0', PORT), ACPMinimalHandler)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n👋 Server stopped")
