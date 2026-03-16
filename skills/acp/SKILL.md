@@ -7,12 +7,13 @@ argument-hint: "No arguments needed - just invoke to bootstrap ACP workflow"
 # ACP Agent Control Panel
 
 **Version:** 1.0.4 | Single-file skill consolidating bootstrap and protocol reference.
+**A2A Compliance:** JSON-RPC 2.0, Agent Card, contextId support
 **ACP_URL** | Ask Human for this, use instead of http://localhost:8766/
 ---
 
 ## BOOTSTRAP SEQUENCE (MANDATORY)
 
-**CRITICAL REQUIREMENT (v1.0.4):** Any agent interacting with ACP MUST send a bootstrap as their FIRST message. No exceptions.
+**CRITICAL REQUIREMENT (1.0.4):** Any agent interacting with ACP MUST send a bootstrap as their FIRST message. No exceptions.
 
 | Scenario | Bootstrap Required |
 |----------|-------------------|
@@ -70,7 +71,7 @@ curl -s -u admin:secret http://localhost:8766/api/whoami
 
 Use the `agent_name` from this point forward in all activity metadata.
 
-### 3. Register with Agent Registry (v1.0.4)
+### 3. Register with Agent Registry (1.0.4)
 
 **NEW:** Register your agent with capabilities for A2A discovery:
 
@@ -141,10 +142,10 @@ POST /api/complete {"activity_id": "orphan_id", "result": "Completed after conte
 ```bash
 GET /api/todos    # Restore TODO list
 GET /api/notes    # Recover saved notes
-GET /api/agents   # See registered agents (v1.0.4)
+GET /api/agents   # See registered agents (1.0.4)
 ```
 
-### 8. Check for A2A Messages (v1.0.4)
+### 8. Check for A2A Messages (1.0.4)
 
 If `hints.a2a.pending_count > 0` in response:
 
@@ -202,7 +203,7 @@ POST /api/action {"complete_id": "prev_id", "result": "prev result", "action": "
 | SEARCH | Web search, grep, find |
 | TODO | TODO state changes |
 | CHAT | Conversational Q&A, planning, reasoning |
-| A2A | **v1.0.4** Agent-to-agent communication |
+| A2A | **1.0.4** Agent-to-agent communication |
 
 ### CHAT Action Type (v1.0.1)
 
@@ -228,7 +229,7 @@ POST /api/action {
 
 **Why it matters:** Pure conversational exchanges consume context window tokens but were previously untracked. CHAT ensures accurate token accounting for all agent activity.
 
-### A2A Action Type (v1.0.4)
+### A2A Action Type (1.0.4)
 
 Automatically logged when using `/api/a2a/send`. Captures inter-agent communication:
 
@@ -282,7 +283,7 @@ The `hints` field in `/api/action` responses provides contextual information:
 | `loop_count` | integer | Number of repetitions if loop detected |
 | `suggestion` | string | Actionable advice when patterns detected |
 | `active_todos` | integer | Count of in-progress TODOs |
-| `a2a` | object | **v1.0.4** A2A hints for pending messages |
+| `a2a` | object | **1.0.4** A2A hints for pending messages |
 
 **Loop Detection:** If `loop_detected: true`, consider:
 - Changing your approach
@@ -291,7 +292,7 @@ The `hints` field in `/api/action` responses provides contextual information:
 
 ---
 
-## A2A HINTS (v1.0.4)
+## A2A HINTS (1.0.4)
 
 When you include `agent_name` in activity metadata, A2A hints notify you of pending messages:
 
@@ -330,7 +331,7 @@ When you include `agent_name` in activity metadata, A2A hints notify you of pend
 
 ---
 
-## A2A AGENT REGISTRY (v1.0.4)
+## A2A AGENT REGISTRY (1.0.4)
 
 ### List Registered Agents
 
@@ -360,14 +361,25 @@ GET /api/agents/LocalClaw
 → {"success": true, "agent": {...}}
 ```
 
-### Register Agent
+### Register Agent (REST)
 
 ```bash
 POST /api/agents/register {
   "agent_name": "LocalClaw",
   "capabilities": ["code-analysis", "file-reading"],
   "model_name": "qwen2.5-coder:0.5b",
-  "endpoint": "http://localhost:8080"
+  "endpoint": "http://localhost:8080",
+  "skills": [
+    {
+      "id": "code_analysis",
+      "name": "Code Analysis",
+      "description": "Analyze code for bugs and improvements",
+      "tags": ["code", "analysis", "review"],
+      "examples": ["Analyze this Python file for bugs"],
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["text/plain"]
+    }
+  ]
 }
 ```
 
@@ -379,7 +391,222 @@ POST /api/agents/unregister {"agent_name": "LocalClaw"}
 
 ---
 
-## A2A MESSAGING (v1.0.4)
+## A2A PROTOCOL COMPLIANCE
+
+ACP-Specification 1.0.4 adds **JSON-RPC 2.0** support for A2A protocol compliance. REST remains the primary API; JSON-RPC is an adapter layer.
+
+### Agent Card Discovery
+
+A2A-compliant agents expose an Agent Card at the well-known URI:
+
+```bash
+GET /.well-known/agent-card.json
+→ {
+  "name": "ACP Server",
+  "description": "Agent Control Panel - Monitoring and observability server for AI agents",
+  "url": "https://xxx.trycloudflare.com",
+  "version": "R7",
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false
+  },
+  "defaultInputModes": ["text/plain", "application/json"],
+  "defaultOutputModes": ["text/plain", "application/json"],
+  "skills": [
+    {
+      "id": "activity_tracking",
+      "name": "Activity Tracking",
+      "description": "Log and monitor agent activities with token estimation",
+      "tags": ["monitoring", "observability", "tokens"],
+      "examples": ["Log a file read", "Track a bash command"]
+    }
+  ],
+  "authentication": {
+    "schemes": ["Basic"]
+  }
+}
+```
+
+### JSON-RPC 2.0 Endpoints
+
+ACP accepts JSON-RPC 2.0 requests at:
+- `/jsonrpc`
+- `/a2a`
+- `/api/jsonrpc`
+
+**Request Format:**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "SendMessage",
+  "params": {...},
+  "id": "req-123"
+}
+```
+
+**Response Format:**
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {...},
+  "id": "req-123"
+}
+```
+
+**Error Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {"code": -32601, "message": "Method not found"},
+  "id": "req-123"
+}
+```
+
+### JSON-RPC Methods
+
+| Method | Description | A2A Spec |
+|--------|-------------|----------|
+| `SendMessage` | Send message to agent | Core |
+| `GetTask` | Get task/activity by ID | Core |
+| `CancelTask` | Cancel running task | Core |
+| `GetAgents` | List agents with Agent Cards | Discovery |
+| `RegisterAgent` | Register agent with skills | Discovery |
+| `activity/start` | Start ACP activity | ACP-native |
+| `activity/complete` | Complete ACP activity | ACP-native |
+| `todos/get` | Get TODO list | ACP-native |
+| `todos/update` | Update TODO list | ACP-native |
+| `status/get` | Get session status | ACP-native |
+| `nudge/set` | Set nudge message | ACP-native |
+| `stop/set` | Set stop flag | ACP-native |
+| `session/reset` | Reset session | ACP-native |
+
+### JSON-RPC Error Codes
+
+| Code | Meaning |
+|------|--------|
+| -32700 | Parse error |
+| -32600 | Invalid Request |
+| -32601 | Method not found |
+| -32602 | Invalid params |
+| -32603 | Internal error |
+| -32001 | Task not found / Stop requested |
+| -32002 | Task not running |
+
+### A2A Task Format
+
+ACP activities map to A2A Tasks:
+
+```json
+{
+  "id": "143052-abc123",
+  "contextId": "ctx-a1b2c3d4e5f6",
+  "status": {
+    "state": "RUNNING",
+    "timestamp": "2025-01-15T14:30:52"
+  },
+  "history": [],
+  "artifacts": [],
+  "metadata": {
+    "action": "READ",
+    "target": "/path/to/file.py",
+    "tokens_in": 150,
+    "tokens_out": 0,
+    "duration_ms": null
+  }
+}
+```
+
+### A2A Task States
+
+| ACP Status | A2A State |
+|------------|-----------|
+| `running` | `RUNNING` |
+| `completed` | `COMPLETED` |
+| `error` | `FAILED` |
+| `cancelled` | `CANCELED` |
+
+### contextId - Session Grouping
+
+The `contextId` groups related tasks into a session:
+
+```bash
+# JSON-RPC SendMessage with contextId
+POST /jsonrpc {
+  "jsonrpc": "2.0",
+  "method": "SendMessage",
+  "params": {
+    "message": {
+      "contextId": "ctx-a1b2c3d4e5f6",
+      "parts": [{"text": "Analyze this file"}],
+      "metadata": {
+        "target_agent": "LocalClaw",
+        "action": "analyze_file"
+      }
+    }
+  },
+  "id": "req-1"
+}
+```
+
+**Context Data Structure:**
+```json
+{
+  "ctx-a1b2c3d4e5f6": {
+    "created": 1705315852.0,
+    "last_activity": 1705315912.0,
+    "agents": ["Super Z", "LocalClaw"],
+    "tasks": ["143052-abc123", "143055-def456"],
+    "metadata": {}
+  }
+}
+```
+
+### AgentSkill Object Structure
+
+When registering agents with skills, use this structure:
+
+```json
+{
+  "id": "code_analysis",
+  "name": "Code Analysis",
+  "description": "Analyze code for bugs, security issues, and improvements",
+  "tags": ["code", "analysis", "review", "security"],
+  "examples": [
+    "Analyze this Python file for potential bugs",
+    "Review this JavaScript code for security issues"
+  ],
+  "inputModes": ["text/plain", "application/json"],
+  "outputModes": ["text/plain", "application/json"]
+}
+```
+
+**Field Definitions:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique skill identifier |
+| `name` | string | Human-readable skill name |
+| `description` | string | Detailed skill description |
+| `tags` | string[] | Tags for discovery/filtering |
+| `examples` | string[] | Example prompts for this skill |
+| `inputModes` | string[] | Supported input MIME types |
+| `outputModes` | string[] | Supported output MIME types |
+
+### JSON-RPC Batch Requests
+
+ACP supports JSON-RPC batch processing:
+
+```json
+[
+  {"jsonrpc": "2.0", "method": "GetAgents", "params": {}, "id": "1"},
+  {"jsonrpc": "2.0", "method": "status/get", "params": {}, "id": "2"}
+]
+```
+
+Response is an array in the same order.
+
+---
+
+## A2A MESSAGING (1.0.4)
 
 ### Send Message
 
@@ -612,7 +839,7 @@ POST /api/complete {"activity_id": "...", "result": "...", "content_size": 5000}
 GET /api/summary     # Session state
 GET /api/todos       # Restore TODOs
 GET /api/notes       # Saved notes
-GET /api/agents      # Registered agents (v1.0.4)
+GET /api/agents      # Registered agents (1.0.4)
 ```
 
 **Before compression:**
@@ -681,7 +908,7 @@ GET /api/activity/143052-a1b2c3
 }
 ```
 
-### POST /api/reset (v1.0.4)
+### POST /api/reset (1.0.4)
 
 Full session reset - clears all state including agents and A2A messages:
 
@@ -827,7 +1054,7 @@ GET /api/csrf-token  # Check if enabled
 // Complete error
 {"activity_id": "...", "error": "File not found"}
 
-// Agent error (v1.0.4)
+// Agent error (1.0.4)
 {"success": false, "error": "Agent not found"}
 ```
 
@@ -839,7 +1066,7 @@ GET /api/csrf-token  # Check if enabled
 # Session start
 GET /api/status
 GET /api/whoami
-POST /api/agents/register {"agent_name": "...", "capabilities": [...]}  # v1.0.4
+POST /api/agents/register {"agent_name": "...", "capabilities": [...]}  # 1.0.4
 GET /api/todos
 
 # Log action
@@ -858,7 +1085,7 @@ POST /api/shell/add {"command": "...", "status": "completed|error", "output_prev
 GET /api/todos
 POST /api/todos/update {"todos": [...]}
 
-# A2A Messaging (v1.0.4)
+# A2A Messaging (1.0.4)
 GET /api/agents
 POST /api/agents/register {"agent_name": "...", ...}
 POST /api/a2a/send {"from_agent": "...", "to_agent": "...", "type": "request", ...}
@@ -870,7 +1097,7 @@ GET /api/running                # Running activities
 GET /api/history                # Completed activity history
 GET /api/activity/{id}          # Single activity
 GET /api/stats/duration         # Duration statistics
-POST /api/reset                 # Full session reset (v1.0.4)
+POST /api/reset                 # Full session reset (1.0.4)
 
 # Shutdown
 POST /api/shutdown {"reason": "...", "export_summary": true}
@@ -897,11 +1124,11 @@ Per spec §3.9 — paths are relative to the server working directory unless ove
 - [ ] **BOOTSTRAP IS MANDATORY** - Every agent MUST send bootstrap as first message
 - [ ] Check status (`GET /api/status`)
 - [ ] Establish identity (`GET /api/whoami`)
-- [ ] **Register with Agent Registry** (`POST /api/agents/register`) - v1.0.4
+- [ ] **Register with Agent Registry** (`POST /api/agents/register`) - 1.0.4
 - [ ] **Log bootstrap activity** (`POST /api/action` with `action: "CHAT"`, `agent_name`)
 - [ ] Log action BEFORE executing
 - [ ] Check `stop_flag`, `nudge`, `orphan_warning`, `hints` in every response
-- [ ] **Check A2A hints** for pending messages - v1.0.4
+- [ ] **Check A2A hints** for pending messages - 1.0.4
 - [ ] Include `content_size` for native tools
 - [ ] Include `agent_name` and `model_name` in metadata
 - [ ] Log shell commands to `/api/shell/add` (except ACP calls)
@@ -913,4 +1140,4 @@ Per spec §3.9 — paths are relative to the server working directory unless ove
 
 ---
 
-*ACP Skill v1.0.4 - Aligned with ACP-Specification.md*
+*ACP Skill 1.0.4 - Aligned with ACP-Specification.md*
