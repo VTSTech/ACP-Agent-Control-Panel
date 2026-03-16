@@ -203,6 +203,48 @@ The complete session state is stored in a single JSON file:
 | `contexts` | **1.0.4** A2A contextId → session mapping for multi-turn interactions |
 | `agent_skills` | **1.0.4** AgentSkill objects per agent for capability discovery |
 
+## 3.1.1 Ownership Model (1.0.4)
+
+Every activity belongs to the agent that created it, as specified by `metadata.agent_name`. This enables safe multi-tenant operation where multiple agents share a single ACP instance.
+
+**Server-Side Enforcement Requirements:**
+
+1. **Activity Creation**: When an activity is created via `/api/action` or `/api/start`, the server MUST store `metadata.agent_name` as the activity`s owner.
+
+2. **Activity Completion**: When an activity is completed via `/api/complete` or the combined `/api/action`, the server MUST validate that the requesting agent matches the activity owner.
+
+3. **Orphan Filtering**: The `orphan_warning` response field MUST only include activities owned by the requesting agent.
+
+4. **Error Response**: If ownership validation fails, return HTTP `403 Forbidden`:
+   ```json
+   {
+     "success": false,
+     "error": "activity owned by {owner_agent_name}"
+   }
+   ```
+
+**Example - Ownership Violation:**
+```bash
+# AgentA created activity "abc123"
+# AgentB tries to complete it:
+POST /api/complete {
+  "activity_id": "abc123",
+  "result": "Completed",
+  "metadata": {"agent_name": "AgentB"}
+}
+→ HTTP 403
+{
+  "success": false,
+  "error": "activity owned by AgentA"
+}
+```
+
+**Why This Matters:**
+- **Multi-tenant safety**: Multiple agents can share one ACP instance without interfering
+- **Orphan isolation**: Agent A cannot accidentally complete Agent B orphaned tasks
+- **Audit integrity**: Activity history accurately reflects which agent performed each action
+- **Security**: Prevents malicious or buggy agents from tampering with other agents work
+
 ### 3.2 Activity Object
 
 ```typescript
