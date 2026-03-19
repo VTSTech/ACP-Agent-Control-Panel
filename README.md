@@ -2,6 +2,8 @@
 
 A lightweight monitoring and observability sidecar for AI agents. Provides real-time tracking of agent activities, token usage, shell commands, and task management through a web UI and REST API.
 
+[![made-with-Markdown](https://img.shields.io/badge/Made%20with-Markdown-1f425f.svg)](http://commonmark.org)
+
 ## Quick Start
 
 ```bash
