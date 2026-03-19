@@ -1,6 +1,6 @@
 # Agent Control Panel (ACP) Specification
 
-**Version:** 1.0.4  
+**Version:** 1.0.5  
 **Status:** Draft  
 **Authors:** VTSTech, Community Contributors  
 **A2A Compliance:** JSON-RPC 2.0, Agent Card, contextId support
@@ -1605,9 +1605,17 @@ Self-awareness endpoint for AI agents. Returns identity context to help agents u
     "example": {"metadata": {"agent_name": "Super Z", "source": "user_request"}},
     "purpose": "Attribution helps track which agent/subagent performed each action."
   },
+  "primary_agent": "Super Z",
   "session": {"<SessionInfo>"}
 }
 ```
+
+**Response Fields:**
+| Field | Description |
+|-------|-------------|
+| `identity` | Self-awareness context for the agent |
+| `primary_agent` | **1.0.5** Name of the agent that owns the context window (first to log activity) |
+| `session` | Current session information |
 
 **When to call:**
 - At session start to establish identity
@@ -1617,8 +1625,9 @@ Self-awareness endpoint for AI agents. Returns identity context to help agents u
 **Agent workflow integration:**
 ```
 1. Call GET /api/whoami at session start
-2. Extract identity hint and determine agent_name
-3. Include agent_name in all activity metadata:
+2. Check primary_agent to see if you own the context
+3. Extract identity hint and determine agent_name
+4. Include agent_name in all activity metadata:
    POST /api/action {"metadata": {"agent_name": "Super Z", ...}}
 ```
 
@@ -1714,6 +1723,35 @@ POST /api/action {"action": "READ", "target": "file.py"}
    b. Adjust behavior accordingly
    c. Call POST /api/nudge/ack (if requires_ack=true)
 3. Continue with task
+```
+
+#### Primary Agent Delivery (1.0.5)
+
+Nudges are delivered **only to the primary agent** (the first agent to log activity in a session). This prevents context pollution in multi-agent environments.
+
+**Delivery Behavior:**
+
+| Agent Type | `/api/action` Response |
+|------------|------------------------|
+| Primary Agent | `"nudge": {...}` if pending, else `null` |
+| Secondary Agents | `"nudge": null` (always) |
+
+**Why this matters:**
+- Secondary agents (subagents, LocalClaw, etc.) don't receive nudges meant for the primary agent
+- Prevents the same nudge from being added to every agent's context
+- Ensures human guidance reaches only the intended agent
+
+**Example:**
+```
+Session has:
+  - primary_agent: "Super Z"
+  - pending nudge: {"message": "Check the API first"}
+  
+Super Z calls /api/action:
+  → nudge: {"message": "Check the API first"}  ✓
+
+LocalClaw calls /api/action:
+  → nudge: null  (not delivered)
 ```
 
 ### 4.12 Agent Registry API (1.0.4)
@@ -2765,7 +2803,16 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 
 ## Appendix B: Changelog
 
-### 1.0.4 (Current)
+### 1.0.5 (Current)
+- **NEW**: `primary_agent` field in `/api/whoami` response - agents can check if they own the context
+- **NEW**: Nudges delivered only to primary agent - prevents context pollution in multi-agent environments
+- **NEW**: §4.11 Primary Agent Delivery section - documents nudge delivery behavior
+- **DOC**: Updated `/api/whoami` response schema with `primary_agent` field
+- **DOC**: Added Response Fields table to `/api/whoami` documentation
+- **DOC**: Updated Agent workflow integration to include primary_agent check
+- **FIX**: Secondary agents now receive `nudge: null` instead of duplicate nudges
+
+### 1.0.4
 - **NEW**: A2A Agent Registry API - agent discovery and presence tracking
 - **NEW**: `POST /api/agents/register` - Register agent with capabilities
 - **NEW**: `POST /api/agents/unregister` - Unregister an agent
