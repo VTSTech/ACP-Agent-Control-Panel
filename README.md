@@ -75,6 +75,9 @@ The full implementation includes everything in minimal plus:
 | **v1.0.4** A2A Hints | Notification of pending messages in activity response |
 | **v1.0.4** JSON-RPC 2.0 | A2A protocol compliance via `/jsonrpc`, `/a2a` endpoints |
 | **v1.0.4** Agent Card | `/.well-known/agent-card.json` for A2A discovery |
+| **v1.0.5** Primary Agent in whoami | `primary_agent` field in `/api/whoami` response |
+| **v1.0.5** Nudge Delivery | Nudges delivered only to primary agent |
+| **v1.0.5** Context Isolation | Secondary agents receive `nudge: null` |
 
 
 ## API Reference
@@ -260,9 +263,9 @@ requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
 
 ## Documentation
 
-- **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.4)
-- **[ACP-Agent-Guide-MIN.md](./ACP-Agent-Guide-MIN.md)** - Quick reference for AI agents (v1.0.4)
-- **[ACP-Agent-Guide-MAX.md](./ACP-Agent-Guide-MAX.md)** - Complete integration guide with examples (v1.0.4)
+- **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.5)
+- **[ACP-Agent-Guide-MIN.md](./ACP-Agent-Guide-MIN.md)** - Quick reference for AI agents (v1.0.5)
+- **[ACP-Agent-Guide-MAX.md](./ACP-Agent-Guide-MAX.md)** - Complete integration guide with examples (v1.0.5)
 
 ## Architecture
 
