@@ -2,7 +2,7 @@
 
 A barebones implementation of the [ACP (Agent Control Panel) Specification](https://github.com/VTSTech/ACP-Agent-Control-Panel) with a basic web UI.
 
-**Version:** v1.0.4 | **~1000 lines** of Python with no external dependencies.
+**Version:** v1.0.5 | **~1000 lines** of Python with no external dependencies.
 
 ## Features
 
@@ -35,6 +35,11 @@ A barebones implementation of the [ACP (Agent Control Panel) Specification](http
 - **JSON-RPC 2.0**: Protocol adapter for A2A compliance
 - **Agent Card**: Discovery endpoint at `/.well-known/agent-card.json`
 - **A2A Hints**: Notification of pending messages in activity response
+
+### v1.0.5 (Primary Agent)
+- **primary_agent in /api/whoami**: Check if you own the context
+- **Nudge Delivery**: Nudges delivered only to primary agent
+- **Context Isolation**: Secondary agents receive `nudge: null`
 
 ## Quick Start
 

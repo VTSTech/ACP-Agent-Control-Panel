@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ACP Minimal v1.0.4 - Full Spec Compliance
+ACP Minimal v1.0.5 - Full Spec Compliance
 
 Endpoints: whoami, status, history, running, activity/{id}, action, start, complete,
            stop, resume, clear_history, reset, reset_session, shutdown, restart,
@@ -12,6 +12,10 @@ Endpoints: whoami, status, history, running, activity/{id}, action, start, compl
            stats/duration, activity/batch,
            session, session/refresh, csrf-token,
            files/list, files/view, files/download, files/stats (read-only)
+           
+NEW in 1.0.5:
+           primary_agent in /api/whoami response
+           Nudges delivered only to primary agent
            
 NEW in 1.0.4:
            agents (GET), agents/register (POST), agents/unregister (POST), agents/{name} (GET)
@@ -53,7 +57,7 @@ ACP_AGENT_CARD = {
     "name": "ACP Server",
     "description": "Agent Control Panel - Monitoring and observability server for AI agents",
     "url": "",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "capabilities": {
         "streaming": False,
         "pushNotifications": False
@@ -475,7 +479,7 @@ _UI = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>ACP Minimal v1.0.4</title>
+    <title>ACP Minimal v1.0.5</title>
     <style>
         :root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#c9d1d9; --primary:#ff6b35; --success:#238636; --danger:#da3633; --warning:#d29922; --info:#58a6ff; }
         body { font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); margin:0; padding:20px; }
@@ -539,7 +543,7 @@ _UI = """<!DOCTYPE html>
 <div class="container">
     <div class="header">
         <div>
-            <h2 style="margin:0;color:var(--primary)">&#x1F916; ACP Minimal <small style="color:#6e7681;font-size:0.8rem">v1.0.4</small></h2>
+            <h2 style="margin:0;color:var(--primary)">&#x1F916; ACP Minimal <small style="color:#6e7681;font-size:0.8rem">v1.0.5</small></h2>
             <div id="timer" style="font-family:monospace;font-size:0.8rem;color:#8b949e;margin-top:4px">Sync in 2.0s</div>
         </div>
         <div class="sys-controls">
@@ -1263,6 +1267,11 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             hints = get_hints(d, target, agent_name)
             orphans = check_orphans(d)
             
+            # 1.0.5: Only deliver nudge to primary agent
+            nudge = d.get("nudge")
+            if agent_name and d.get("primary_agent") and agent_name != d.get("primary_agent"):
+                nudge = None  # Secondary agents don't receive nudges
+            
             self.send_json({
                 "success": True,
                 "activity_id": activity_id,
@@ -1274,7 +1283,7 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
                 "session": get_session_info(),
                 "running_count": len(d["running"]),
                 "hints": hints,
-                "nudge": d.get("nudge"),
+                "nudge": nudge,
                 "orphan_warning": {"count": len(orphans), "tasks": orphans} if orphans else None
             })
 
