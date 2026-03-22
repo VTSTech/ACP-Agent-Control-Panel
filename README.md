@@ -4,6 +4,8 @@ A lightweight monitoring and observability sidecar for AI agents. Provides real-
 
 [![made-with-Markdown](https://img.shields.io/badge/Made%20with-Markdown-1f425f.svg)](http://commonmark.org)
 
+<img width="1803" height="910" alt="image" src="https://github.com/user-attachments/assets/d3642535-e903-4996-beaf-60fbea802171" />
+
 ## Quick Start
 
 ```bash
