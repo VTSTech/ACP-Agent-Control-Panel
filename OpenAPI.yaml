@@ -1,0 +1,1946 @@
+openapi: 3.0.3
+info:
+  title: Agent Control Panel (ACP) API
+  description: |
+    The Agent Control Panel (ACP) is a monitoring and observability protocol for AI agents.
+    It provides a standardized RESTful HTTP API to monitor, control, and recover AI agent sessions.
+
+    **Version:** 1.0.5
+    **Status:** Draft
+    **Authors:** VTSTech, Community Contributors
+    **A2A Compliance:** JSON-RPC 2.0, Agent Card, contextId support
+
+    For more details, see the [full specification](https://github.com/VTSTech/ACP-Agent-Control-Panel).
+  version: 1.0.5
+  contact:
+    name: VTSTech
+    url: https://github.com/VTSTech
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8766
+    description: Default ACP server
+
+security:
+  - BasicAuth: []
+
+paths:
+  # ==================== Activity Monitor Endpoints ====================
+  /api/status:
+    get:
+      summary: Get session status
+      description: Returns stop flag, token usage, running activities, and other session metadata.
+      operationId: getStatus
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+  /api/running:
+    get:
+      summary: List running activities
+      operationId: getRunning
+      responses:
+        '200':
+          description: List of running activities
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  running:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Activity'
+  /api/history:
+    get:
+      summary: List completed activities
+      operationId: getHistory
+      responses:
+        '200':
+          description: List of completed activities (most recent first)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  history:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Activity'
+  /api/all:
+    get:
+      summary: Get combined session data
+      description: Returns status, running, history, and token usage in one call.
+      operationId: getAll
+      responses:
+        '200':
+          description: Combined session data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AllResponse'
+  /api/activity/{activity_id}:
+    get:
+      summary: Get a single activity by ID
+      operationId: getActivity
+      parameters:
+        - name: activity_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Activity ID
+      responses:
+        '200':
+          description: Activity object
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  activity:
+                    $ref: '#/components/schemas/Activity'
+        '404':
+          description: Activity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/start:
+    post:
+      summary: Start a new activity
+      operationId: startActivity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartActivityRequest'
+      responses:
+        '200':
+          description: Activity started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartActivityResponse'
+        '403':
+          description: Stop requested or CSRF invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/complete:
+    post:
+      summary: Complete an activity
+      operationId: completeActivity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteActivityRequest'
+      responses:
+        '200':
+          description: Activity completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteActivityResponse'
+        '404':
+          description: Activity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Ownership violation or CSRF invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/action:
+    post:
+      summary: Combined operation - complete previous and start new
+      operationId: combinedAction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CombinedActionRequest'
+      responses:
+        '200':
+          description: Operation successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CombinedActionResponse'
+        '403':
+          description: Stop requested, ownership violation, or CSRF invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/stop:
+    post:
+      summary: Trigger STOP ALL - cancels all running activities
+      operationId: stopAll
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Human-readable reason for stop
+      responses:
+        '200':
+          description: Stop flag set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/resume:
+    post:
+      summary: Clear stop flag and resume operations
+      operationId: resume
+      responses:
+        '200':
+          description: Stop flag cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/shutdown:
+    post:
+      summary: Gracefully end the session
+      description: Exports session summary, cancels running activities, and stops the server.
+      operationId: shutdown
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Human-readable reason for shutdown
+                export_summary:
+                  type: boolean
+                  default: true
+                  description: Whether to export session summary
+      responses:
+        '200':
+          description: Shutdown initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  summary_exported:
+                    type: boolean
+                  summary_path:
+                    type: string
+                  cancelled_activities:
+                    type: integer
+                  note:
+                    type: string
+  /api/clear_history:
+    post:
+      summary: Clear activity history
+      operationId: clearHistory
+      responses:
+        '200':
+          description: History cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/reset_session:
+    post:
+      summary: Reset session to fresh state (tokens reset to startup value)
+      operationId: resetSession
+      responses:
+        '200':
+          description: Session reset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/reset:
+    post:
+      summary: Full session reset - clears all state including agents and A2A messages
+      operationId: fullReset
+      responses:
+        '200':
+          description: Full reset completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  stats:
+                    type: object
+                    properties:
+                      history_cleared:
+                        type: integer
+                      shell_cleared:
+                        type: integer
+                      todos_cleared:
+                        type: integer
+                      agents_cleared:
+                        type: integer
+                      a2a_cleared:
+                        type: integer
+                      tokens_reset:
+                        type: integer
+
+  # ==================== TODO Endpoints ====================
+  /api/todos:
+    get:
+      summary: Get current TODO list
+      operationId: getTodos
+      responses:
+        '200':
+          description: TODO list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  todos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TODO'
+  /api/todos/update:
+    post:
+      summary: Replace entire TODO list
+      operationId: updateTodos
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - todos
+              properties:
+                todos:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/TODOInput'
+      responses:
+        '200':
+          description: TODOs updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/todos/add:
+    post:
+      summary: Add single TODO item
+      operationId: addTodo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - todo
+              properties:
+                todo:
+                  $ref: '#/components/schemas/TODOInput'
+                agent_name:
+                  type: string
+                tool:
+                  type: string
+                skill:
+                  type: string
+      responses:
+        '200':
+          description: TODO added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/todos/clear:
+    post:
+      summary: Clear completed TODOs
+      operationId: clearTodos
+      responses:
+        '200':
+          description: Completed TODOs cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ==================== Shell History Endpoints ====================
+  /api/shell:
+    get:
+      summary: Get shell command history
+      operationId: getShellHistory
+      responses:
+        '200':
+          description: Shell history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  shell_history:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ShellEntry'
+  /api/shell/add:
+    post:
+      summary: Add shell command to history
+      operationId: addShellEntry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddShellEntryRequest'
+      responses:
+        '200':
+          description: Shell entry added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/shell/clear:
+    post:
+      summary: Clear shell history
+      operationId: clearShellHistory
+      responses:
+        '200':
+          description: Shell history cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ==================== Context Recovery Endpoints ====================
+  /api/summary:
+    get:
+      summary: Get condensed session summary for context recovery
+      operationId: getSummary
+      responses:
+        '200':
+          description: Session summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  summary:
+                    $ref: '#/components/schemas/SessionSummary'
+  /api/summary/export:
+    get:
+      summary: Export summary to persistent markdown file
+      operationId: exportSummary
+      responses:
+        '200':
+          description: Summary exported
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  filepath:
+                    type: string
+                  note:
+                    type: string
+  /api/notes:
+    get:
+      summary: Get all AI notes
+      operationId: getNotes
+      responses:
+        '200':
+          description: List of notes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  notes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Note'
+  /api/notes/add:
+    post:
+      summary: Add note for context recovery
+      operationId: addNote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddNoteRequest'
+      responses:
+        '200':
+          description: Note added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/notes/clear:
+    post:
+      summary: Clear all AI notes
+      operationId: clearNotes
+      responses:
+        '200':
+          description: Notes cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ==================== File Manager Endpoints ====================
+  /api/files/list:
+    get:
+      summary: List directory contents
+      operationId: listDirectory
+      parameters:
+        - name: X-Path
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Relative path from base directory
+        - name: X-Sort-By
+          in: header
+          schema:
+            type: string
+            enum: [name, date, size]
+          description: Sort field
+        - name: X-Sort-Dir
+          in: header
+          schema:
+            type: string
+            enum: [asc, desc]
+          description: Sort direction
+      responses:
+        '200':
+          description: Directory listing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  files:
+                    type: array
+                    items:
+                      type: object
+  /api/files/view:
+    get:
+      summary: View file content (text files only)
+      operationId: viewFile
+      parameters:
+        - name: X-Path
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Relative path to file
+      responses:
+        '200':
+          description: File content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: string
+                  path:
+                    type: string
+                  lines:
+                    type: integer
+                  tokens:
+                    type: integer
+                  session_tokens:
+                    type: integer
+  /api/files/download:
+    get:
+      summary: Download file (binary safe)
+      operationId: downloadFile
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Relative path to file
+      responses:
+        '200':
+          description: File content
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /api/files/image:
+    get:
+      summary: Get image file
+      operationId: getImage
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Relative path to image file
+      responses:
+        '200':
+          description: Image file
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+  /api/files/stats:
+    get:
+      summary: Get file statistics
+      operationId: getFileStats
+      responses:
+        '200':
+          description: File stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  total_files:
+                    type: integer
+                  total_directories:
+                    type: integer
+                  total_size_bytes:
+                    type: integer
+  /api/files/upload:
+    post:
+      summary: Upload file
+      operationId: uploadFile
+      parameters:
+        - name: X-Path
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Destination directory
+        - name: X-Filename
+          in: header
+          required: true
+          schema:
+            type: string
+          description: File name
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: File uploaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/files/save:
+    post:
+      summary: Save edited file
+      operationId: saveFile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - path
+                - content
+              properties:
+                path:
+                  type: string
+                content:
+                  type: string
+      responses:
+        '200':
+          description: File saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/files/delete:
+    post:
+      summary: Delete file or directory
+      operationId: deleteFile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - path
+              properties:
+                path:
+                  type: string
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/files/mkdir:
+    post:
+      summary: Create directory
+      operationId: createDirectory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - path
+                - name
+              properties:
+                path:
+                  type: string
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Directory created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/files/extract:
+    post:
+      summary: Extract archive
+      operationId: extractArchive
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - path
+              properties:
+                path:
+                  type: string
+      responses:
+        '200':
+          description: Archive extracted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/files/compress:
+    post:
+      summary: Create zip archive
+      operationId: compressFiles
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - path
+                - name
+                - items
+              properties:
+                path:
+                  type: string
+                name:
+                  type: string
+                items:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Archive created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ==================== Duration Statistics API ====================
+  /api/stats/duration:
+    get:
+      summary: Get activity duration statistics
+      operationId: getDurationStats
+      responses:
+        '200':
+          description: Duration statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  stats:
+                    type: object
+                    properties:
+                      by_action:
+                        type: object
+                        additionalProperties:
+                          type: object
+                      slow_activities:
+                        type: array
+                      total_duration_ms:
+                        type: integer
+                      activities_with_duration:
+                        type: integer
+                      average_duration_ms:
+                        type: integer
+                      slow_threshold_ms:
+                        type: integer
+                      trend:
+                        type: array
+                  slow_threshold_seconds:
+                    type: number
+
+  # ==================== Batch Operations API ====================
+  /api/activity/batch:
+    post:
+      summary: Process multiple activity operations in a single request
+      operationId: batchOperations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - operations
+              properties:
+                operations:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: object
+                    required:
+                      - type
+                    properties:
+                      type:
+                        type: string
+                        enum: [start, complete]
+                      action:
+                        type: string
+                      target:
+                        type: string
+                      activity_id:
+                        type: string
+                      result:
+                        type: string
+                      content_size:
+                        type: integer
+                      metadata:
+                        type: object
+      responses:
+        '200':
+          description: Batch processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  results:
+                    type: array
+                  count:
+                    type: integer
+                  session_tokens:
+                    type: integer
+                  context_window:
+                    type: integer
+                  tokens_remaining:
+                    type: integer
+
+  # ==================== System Endpoints ====================
+  /api/system:
+    get:
+      summary: Get CPU, RAM, Disk statistics
+      operationId: getSystemStats
+      responses:
+        '200':
+          description: System stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  system:
+                    type: object
+  /api/session:
+    get:
+      summary: Get session info
+      operationId: getSessionInfo
+      responses:
+        '200':
+          description: Session information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  session:
+                    type: object
+  /api/session/refresh:
+    post:
+      summary: Reset session timeout
+      operationId: refreshSession
+      responses:
+        '200':
+          description: Session refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/restart:
+    post:
+      summary: Restart the ACP server
+      operationId: restartServer
+      responses:
+        '200':
+          description: Restarting...
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+  /api/csrf-token:
+    get:
+      summary: Get CSRF token (if enabled)
+      operationId: getCsrfToken
+      responses:
+        '200':
+          description: CSRF token or disabled message
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  csrf_enabled:
+                    type: boolean
+                  csrf_token:
+                    type: string
+                    nullable: true
+                  expires_in:
+                    type: integer
+                    nullable: true
+                  message:
+                    type: string
+                    nullable: true
+  /api/whoami:
+    get:
+      summary: Self-awareness endpoint for AI agents
+      description: Returns identity context to help agents understand their role and attribute activities.
+      operationId: whoami
+      responses:
+        '200':
+          description: Identity information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  identity:
+                    type: object
+                    properties:
+                      hint:
+                        type: string
+                      suggestion:
+                        type: string
+                      example:
+                        type: object
+                      purpose:
+                        type: string
+                  primary_agent:
+                    type: string
+                  session:
+                    type: object
+
+  # ==================== Nudge API ====================
+  /api/nudge:
+    get:
+      summary: Check if a nudge is pending
+      operationId: getNudge
+      responses:
+        '200':
+          description: Nudge status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  nudge:
+                    $ref: '#/components/schemas/Nudge'
+                  has_pending:
+                    type: boolean
+    post:
+      summary: Create a nudge to be delivered on next action
+      operationId: createNudge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+                priority:
+                  type: string
+                  enum: [normal, high, urgent]
+                  default: normal
+                requires_ack:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: Nudge queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  nudge:
+                    $ref: '#/components/schemas/Nudge'
+                  message:
+                    type: string
+  /api/nudge/ack:
+    post:
+      summary: Acknowledge a nudge (clears it)
+      operationId: acknowledgeNudge
+      responses:
+        '200':
+          description: Nudge acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ==================== Agent Registry API ====================
+  /api/agents:
+    get:
+      summary: List all registered agents
+      operationId: listAgents
+      responses:
+        '200':
+          description: List of agents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  agents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Agent'
+                  count:
+                    type: integer
+                  primary_agent:
+                    type: string
+  /api/agents/{agent_name}:
+    get:
+      summary: Get a specific agent by name
+      operationId: getAgent
+      parameters:
+        - name: agent_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  agent:
+                    $ref: '#/components/schemas/Agent'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/agents/register:
+    post:
+      summary: Register an agent with capabilities
+      operationId: registerAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - agent_name
+              properties:
+                agent_name:
+                  type: string
+                capabilities:
+                  type: array
+                  items:
+                    type: string
+                model_name:
+                  type: string
+                endpoint:
+                  type: string
+      responses:
+        '200':
+          description: Agent registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  agent:
+                    $ref: '#/components/schemas/Agent'
+                  message:
+                    type: string
+  /api/agents/unregister:
+    post:
+      summary: Unregister an agent
+      operationId: unregisterAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - agent_name
+              properties:
+                agent_name:
+                  type: string
+      responses:
+        '200':
+          description: Agent unregistered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ==================== A2A Messaging API ====================
+  /api/a2a/send:
+    post:
+      summary: Send a message to another agent
+      operationId: sendA2AMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendA2AMessageRequest'
+      responses:
+        '200':
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/A2AMessage'
+  /api/a2a/history:
+    get:
+      summary: Get A2A message history
+      operationId: getA2AMessages
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+          description: Filter by sender agent name
+        - name: to
+          in: query
+          schema:
+            type: string
+          description: Filter by recipient agent name
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [request, response, notification]
+          description: Filter by message type
+      responses:
+        '200':
+          description: Message history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/A2AMessage'
+                  count:
+                    type: integer
+
+  # ==================== JSON-RPC 2.0 Endpoints ====================
+  /jsonrpc:
+    post:
+      summary: JSON-RPC 2.0 endpoint
+      description: Accepts JSON-RPC requests for A2A protocol compliance.
+      operationId: jsonRpc
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JsonRpcRequest'
+      responses:
+        '200':
+          description: JSON-RPC response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonRpcResponse'
+  /a2a:
+    post:
+      summary: Alternative JSON-RPC endpoint (A2A)
+      operationId: a2aRpc
+      $ref: '#/paths/~1jsonrpc'
+  /api/jsonrpc:
+    post:
+      summary: JSON-RPC endpoint under /api
+      operationId: apiJsonRpc
+      $ref: '#/paths/~1jsonrpc'
+  /.well-known/agent-card.json:
+    get:
+      summary: A2A Agent Card discovery
+      description: Returns the server's Agent Card describing capabilities, skills, and authentication.
+      operationId: getAgentCard
+      responses:
+        '200':
+          description: Agent Card
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentCard'
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: max-age=3600
+            ETag:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    BasicAuth:
+      type: http
+      scheme: basic
+      description: HTTP Basic Authentication. Use username and password configured via environment variables (default admin/secret).
+
+  schemas:
+    Activity:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Activity ID in "HHMMSS-abc123" format
+        action:
+          type: string
+          enum: [READ, WRITE, EDIT, BASH, TODO, SKILL, API, SEARCH, CHAT, A2A]
+        target:
+          type: string
+        details:
+          type: string
+        status:
+          type: string
+          enum: [running, completed, error, cancelled]
+        started:
+          type: string
+          format: date-time
+        completed:
+          type: string
+          format: date-time
+        tokens_in:
+          type: integer
+        tokens_out:
+          type: integer
+        result:
+          type: string
+          maxLength: 500
+        error:
+          type: string
+          maxLength: 200
+        duration_ms:
+          type: integer
+        priority:
+          type: string
+          enum: [high, medium, low]
+        metadata:
+          type: object
+          additionalProperties: true
+    TODO:
+      type: object
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+        status:
+          type: string
+          enum: [pending, in_progress, completed]
+        priority:
+          type: string
+          enum: [high, medium, low]
+        created:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+    TODOInput:
+      type: object
+      properties:
+        content:
+          type: string
+        status:
+          type: string
+          enum: [pending, in_progress, completed]
+        priority:
+          type: string
+          enum: [high, medium, low]
+    ShellEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        command:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [running, completed, error]
+        output_preview:
+          type: string
+        metadata:
+          type: object
+    Note:
+      type: object
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        category:
+          type: string
+          enum: [decision, insight, context, warning, todo]
+        content:
+          type: string
+        importance:
+          type: string
+          enum: [normal, high]
+    Agent:
+      type: object
+      properties:
+        name:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        model_name:
+          type: string
+        endpoint:
+          type: string
+        status:
+          type: string
+          enum: [online, offline]
+        registered_at:
+          type: string
+          format: date-time
+        last_seen:
+          type: string
+          format: date-time
+        tokens_used:
+          type: integer
+        online:
+          type: boolean
+    A2AMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        from_agent:
+          type: string
+        to_agent:
+          type: string
+        type:
+          type: string
+          enum: [request, response, notification]
+        action:
+          type: string
+        payload:
+          type: object
+        priority:
+          type: string
+          enum: [normal, high, urgent]
+        reply_to:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        ttl:
+          type: integer
+    Nudge:
+      type: object
+      properties:
+        message:
+          type: string
+        priority:
+          type: string
+          enum: [normal, high, urgent]
+        requires_ack:
+          type: boolean
+        timestamp:
+          type: string
+          format: date-time
+        from:
+          type: string
+        type:
+          type: string
+    AgentCard:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        url:
+          type: string
+        version:
+          type: string
+        capabilities:
+          type: object
+          properties:
+            streaming:
+              type: boolean
+            pushNotifications:
+              type: boolean
+        defaultInputModes:
+          type: array
+          items:
+            type: string
+        defaultOutputModes:
+          type: array
+          items:
+            type: string
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentSkill'
+        authentication:
+          type: object
+          properties:
+            schemes:
+              type: array
+              items:
+                type: string
+        metadata:
+          type: object
+    AgentSkill:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        examples:
+          type: array
+          items:
+            type: string
+        inputModes:
+          type: array
+          items:
+            type: string
+        outputModes:
+          type: array
+          items:
+            type: string
+    JsonRpcRequest:
+      type: object
+      required:
+        - jsonrpc
+        - method
+      properties:
+        jsonrpc:
+          type: string
+          enum: ['2.0']
+        method:
+          type: string
+        params:
+          type: object
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+            - type: 'null'
+    JsonRpcResponse:
+      type: object
+      properties:
+        jsonrpc:
+          type: string
+        result:
+          type: object
+        error:
+          type: object
+          properties:
+            code:
+              type: integer
+            message:
+              type: string
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+            - type: 'null'
+    StartActivityRequest:
+      type: object
+      required:
+        - action
+        - target
+      properties:
+        action:
+          type: string
+          enum: [READ, WRITE, EDIT, BASH, TODO, SKILL, API, SEARCH, CHAT, A2A]
+        target:
+          type: string
+        details:
+          type: string
+        content_size:
+          type: integer
+          description: Character count of content read/consumed
+        priority:
+          type: string
+          enum: [high, medium, low]
+          default: medium
+        metadata:
+          type: object
+    StartActivityResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        activity_id:
+          type: string
+        session_tokens:
+          type: integer
+        context_window:
+          type: integer
+        tokens_remaining:
+          type: integer
+        hints:
+          $ref: '#/components/schemas/ActivityHints'
+    CompleteActivityRequest:
+      type: object
+      required:
+        - activity_id
+      properties:
+        activity_id:
+          type: string
+        result:
+          type: string
+          maxLength: 500
+        error:
+          type: string
+          maxLength: 200
+        content_size:
+          type: integer
+          description: Character count of content written/generated
+        metadata:
+          type: object
+    CompleteActivityResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        activity:
+          $ref: '#/components/schemas/Activity'
+        session_tokens:
+          type: integer
+        context_window:
+          type: integer
+        tokens_remaining:
+          type: integer
+        hints:
+          $ref: '#/components/schemas/ActivityHints'
+    CombinedActionRequest:
+      type: object
+      required:
+        - action
+        - target
+      properties:
+        complete_id:
+          type: string
+        result:
+          type: string
+        error:
+          type: string
+        complete_content_size:
+          type: integer
+        complete_metadata:
+          type: object
+        action:
+          type: string
+          enum: [READ, WRITE, EDIT, BASH, TODO, SKILL, API, SEARCH, CHAT, A2A]
+        target:
+          type: string
+        details:
+          type: string
+        content_size:
+          type: integer
+        priority:
+          type: string
+          enum: [high, medium, low]
+        metadata:
+          type: object
+    CombinedActionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        activity_id:
+          type: string
+        completed:
+          $ref: '#/components/schemas/Activity'
+        stop_flag:
+          type: boolean
+        session_tokens:
+          type: integer
+        context_window:
+          type: integer
+        tokens_remaining:
+          type: integer
+        tokens_percent:
+          type: number
+        overflow_warning:
+          type: string
+          nullable: true
+        session:
+          type: object
+        running_count:
+          type: integer
+        hints:
+          $ref: '#/components/schemas/ActivityHints'
+        nudge:
+          $ref: '#/components/schemas/Nudge'
+        orphan_warning:
+          type: object
+          properties:
+            count:
+              type: integer
+            tasks:
+              type: array
+              items:
+                type: object
+            suggestion:
+              type: string
+    ActivityHints:
+      type: object
+      properties:
+        modified_this_session:
+          type: boolean
+        modification_count:
+          type: integer
+        last_action:
+          type: string
+        recent_errors:
+          type: integer
+        last_error:
+          type: string
+        related_todos:
+          type: array
+          items:
+            type: object
+        loop_detected:
+          type: boolean
+        loop_count:
+          type: integer
+        suggestion:
+          type: string
+        active_todos:
+          type: integer
+        a2a:
+          type: object
+          properties:
+            pending_count:
+              type: integer
+            senders:
+              type: array
+              items:
+                type: string
+            preview:
+              type: object
+    StatusResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        stop_flag:
+          type: boolean
+        stop_reason:
+          type: string
+          nullable: true
+        running_count:
+          type: integer
+        running:
+          type: array
+          items:
+            $ref: '#/components/schemas/Activity'
+        session_tokens:
+          type: integer
+        startup_tokens:
+          type: integer
+        activity_tokens:
+          type: integer
+        context_window:
+          type: integer
+        tokens_remaining:
+          type: integer
+        tokens_percent:
+          type: number
+        overflow_warning:
+          type: string
+          nullable: true
+        primary_agent:
+          type: string
+        agent_tokens:
+          type: object
+        other_agents_tokens:
+          type: integer
+        tunnel_url:
+          type: string
+          nullable: true
+        session:
+          type: object
+    AllResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        stop_flag:
+          type: boolean
+        stop_reason:
+          type: string
+          nullable: true
+        running:
+          type: array
+          items:
+            $ref: '#/components/schemas/Activity'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/Activity'
+        session_tokens:
+          type: integer
+        context_window:
+          type: integer
+        tokens_remaining:
+          type: integer
+        tokens_percent:
+          type: number
+        tunnel_url:
+          type: string
+          nullable: true
+    AddShellEntryRequest:
+      type: object
+      required:
+        - command
+      properties:
+        command:
+          type: string
+          maxLength: 500
+        status:
+          type: string
+          enum: [running, completed, error]
+          default: completed
+        output_preview:
+          type: string
+          maxLength: 200
+        agent_name:
+          type: string
+        tool:
+          type: string
+        metadata:
+          type: object
+    AddNoteRequest:
+      type: object
+      required:
+        - content
+      properties:
+        category:
+          type: string
+          enum: [decision, insight, context, warning, todo]
+          default: context
+        content:
+          type: string
+          maxLength: 500
+        importance:
+          type: string
+          enum: [normal, high]
+          default: normal
+    SessionSummary:
+      type: object
+      properties:
+        session_overview:
+          type: object
+        token_usage:
+          type: object
+        file_interactions:
+          type: object
+        ai_notes:
+          type: array
+        todos:
+          type: array
+        recent_activities:
+          type: array
+    SendA2AMessageRequest:
+      type: object
+      required:
+        - from_agent
+        - to_agent
+      properties:
+        from_agent:
+          type: string
+        to_agent:
+          type: string
+        type:
+          type: string
+          enum: [request, response, notification]
+          default: notification
+        action:
+          type: string
+        payload:
+          type: object
+        priority:
+          type: string
+          enum: [normal, high, urgent]
+          default: normal
+        ttl:
+          type: integer
+          default: 3600
+        reply_to:
+          type: string
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          type: string
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        message:
+          type: string
