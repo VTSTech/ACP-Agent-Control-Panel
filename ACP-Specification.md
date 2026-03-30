@@ -1,6 +1,6 @@
 # Agent Control Panel (ACP) Specification
 
-**Version:** 1.0.5  
+**Version:** 1.0.6  
 **Status:** Draft  
 **Authors:** VTSTech, Community Contributors  
 **A2A Compliance:** JSON-RPC 2.0, Agent Card, contextId support
@@ -590,7 +590,7 @@ interface A2AMessage {
 | `high` | Important but not blocking |
 | `urgent` | Requires immediate attention |
 
-### 3.9 Storage Files
+### 3.13 Storage Files
 
 | File | Purpose | Persistence |
 |------|---------|-------------|

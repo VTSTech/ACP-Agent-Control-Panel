@@ -6,7 +6,7 @@ argument-hint: "No arguments needed - just invoke to bootstrap ACP workflow"
 
 # ACP Skill (Minimal)
 
-**Version:** 1.0.5 | **A2A Compliant**
+**Version:** 1.0.6 | **A2A Compliant**
 
 ## Environment (Ask Human)
 
@@ -472,4 +472,4 @@ POST /api/files/mkdir           # Create dir {"path": "...", "name": "..."}
 
 ---
 
-*ACP Skill 1.0.5 Minimal*
+*ACP Skill 1.0.6 Minimal*
