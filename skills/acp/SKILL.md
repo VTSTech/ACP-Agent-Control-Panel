@@ -18,6 +18,23 @@ argument-hint: "No arguments needed - just invoke to bootstrap ACP workflow"
 
 ---
 
+## CSRF PROTECTION
+
+CSRF protection is **optional** and **disabled by default** for development/testing convenience. When disabled, POST requests do not require a CSRF token. Enable via `GLMACP_CSRF_ENABLED=true` for production deployments exposed to untrusted networks.
+
+```bash
+# Check CSRF status
+GET {ACP_URL}/api/csrf-token
+→ {"success": true, "csrf_enabled": false, "csrf_token": null}
+
+# If CSRF is enabled, include the token header on all POST requests:
+# X-CSRF-Token: <timestamp>:<signature>
+```
+
+**CORS (1.0.6):** The server includes CORS headers and handles `OPTIONS` preflight requests, enabling browser-based cross-origin API consumption.
+
+---
+
 ## BOOTSTRAP (MANDATORY)
 
 Execute on every session start / context resume:
@@ -86,8 +103,10 @@ POST {ACP_URL}/api/action {
 ```bash
 POST {ACP_URL}/api/complete {
   "activity_id": "...",
-  "result": "what happened",
-  "content_size": 0
+  "result": "what happened",     # Result summary (max 500 chars)
+  "error": "error message",      # Error message if failed (max 200 chars) — optional
+  "content_size": 0,             # Character count written (for token tracking)
+  "metadata": {"file_hash": "..."}  # Additional metadata (merged with existing)
 }
 ```
 
@@ -95,11 +114,17 @@ POST {ACP_URL}/api/complete {
 
 ```bash
 POST {ACP_URL}/api/action {
-  "complete_id": "prev_id",
-  "result": "previous result",
-  "action": "READ",
-  "target": "next file",
-  "metadata": {"agent_name": "Super Z"}
+  "complete_id": "prev_id",           # Previous activity to complete
+  "result": "previous result",        # Result summary for previous activity
+  "error": "previous error",          # Error if previous activity failed — optional
+  "complete_content_size": 0,         # Chars written in previous activity
+  "complete_metadata": {"key": "..."}, # Metadata merged into previous activity
+  "action": "READ",                   # New action type
+  "target": "next file",              # New target
+  "details": "human description",     # Description for new activity
+  "content_size": 0,                  # Chars to be read in new activity
+  "priority": "medium",               # Priority for new activity
+  "metadata": {"agent_name": "Super Z"}  # Metadata for new activity
 }
 ```
 
@@ -159,6 +184,13 @@ POST {ACP_URL}/api/nudge/ack {}
 → {"success": true}
 ```
 
+**Polling for nudges (1.0.6):**
+```bash
+# Check if a nudge is pending without logging an action
+GET {ACP_URL}/api/nudge
+→ {"success": true, "nudge": {...}, "has_pending": true}
+```
+
 ---
 
 ## SHELL LOGGING (MANDATORY)
@@ -178,7 +210,8 @@ POST {ACP_URL}/api/shell/add {
   "command": "npm install",
   "status": "completed|error",
   "output_preview": "first 200 chars of output",
-  "agent_name": "Super Z"
+  "agent_name": "Super Z",
+  "tool": "Bash"                          # Tool that executed the command — optional
 }
 
 # 4. Complete the activity
@@ -229,9 +262,12 @@ In multi-agent sessions, always complete your own activities. `orphan_warning` o
 POST {ACP_URL}/api/a2a/send {
   "from_agent": "Super Z",
   "to_agent": "OtherAgent",
-  "type": "request|response|notification",
-  "action": "do_thing",
-  "payload": {...}
+  "type": "request|response|notification",    # Default: "notification"
+  "action": "do_thing",                       # Action identifier for requests — optional
+  "payload": {...},                           # Message data — optional
+  "priority": "normal|high|urgent",           # Default: "normal"
+  "ttl": 3600,                                # Time-to-live in seconds (default: 3600)
+  "reply_to": "msg_id"                        # Message ID this replies to — optional
 }
 ```
 
@@ -239,6 +275,8 @@ POST {ACP_URL}/api/a2a/send {
 
 ```bash
 GET {ACP_URL}/api/a2a/history?to=Super Z
+GET {ACP_URL}/api/a2a/history?from=OtherAgent
+GET {ACP_URL}/api/a2a/history?type=request
 ```
 
 ---
@@ -248,6 +286,9 @@ GET {ACP_URL}/api/a2a/history?to=Super Z
 ```bash
 GET  {ACP_URL}/api/todos
 POST {ACP_URL}/api/todos/update {"todos": [...]}
+POST {ACP_URL}/api/todos/add    {"todo": {"content": "...", "priority": "high"}, "agent_name": "Super Z"}
+POST {ACP_URL}/api/todos/toggle {"id": "143052-a1b2c3"}   # Toggle pending ↔ completed (1.0.6)
+POST {ACP_URL}/api/todos/clear                              # Clear completed TODOs
 ```
 
 **Note:** Log **all** TODO state changes as `TODO` action type via `/api/action`.
@@ -261,9 +302,9 @@ POST {ACP_URL}/api/todos/update {"todos": [...]}
 ```bash
 # Save important decisions, discoveries, warnings
 POST {ACP_URL}/api/notes/add {
-  "category": "decision|insight|context|warning|todo",
+  "category": "decision|insight|context|warning|todo",   # Default: "context"
   "content": "...",
-  "importance": "normal|high"
+  "importance": "normal|high"                             # Default: "normal"
 }
 
 # Export session summary to persistent file
@@ -295,11 +336,29 @@ GET {ACP_URL}/api/agents     # See registered agents (v1.0.4)
 
 ---
 
-## SHUTDOWN HANDLING
+## CONTROL ENDPOINTS
+
+### Stop / Resume
+
+```bash
+# Trigger STOP ALL — cancels all running activities
+POST {ACP_URL}/api/stop {"reason": "User clicked STOP ALL"}    # reason is optional
+
+# Clear stop flag and resume operations
+POST {ACP_URL}/api/resume
+```
+
+### Shutdown
 
 When the human ends the session (UI button or `POST /api/shutdown`):
 
 ```bash
+# Trigger graceful shutdown
+POST {ACP_URL}/api/shutdown {
+  "reason": "Session ended by user",    # Default: "Session ended by user"
+  "export_summary": true                # Default: true
+}
+
 # 1. You receive a shutdown nudge in your next /api/action response
 → {"nudge": {"message": "SESSION ENDING: ...", "priority": "urgent", "requires_ack": true, "type": "shutdown"}}
 
@@ -311,79 +370,6 @@ POST {ACP_URL}/api/nudge/ack {}
 ```
 
 **What /api/shutdown does:** exports session summary, cancels running activities, delivers shutdown nudge, stops server after 2 seconds.
-
----
-
-## FILE MANAGEMENT
-
-The ACP server provides a File Manager for workspace access. All agent-generated files should be uploaded to `/workspace/` on the ACP server for centralized access and sharing.
-
-### Base Directory
-
-Files are served from a base directory configured via `ACP_BASE_DIR` environment variable (default: `.`). All paths are relative to this base.
-
-**Recommended:** Set `ACP_BASE_DIR=/workspace` and upload all agent files there.
-
-### Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/files/list` | GET | List directory contents (headers: `X-Path`, `X-Sort-By`, `X-Sort-Dir`) |
-| `/api/files/view` | GET | View text file content (header: `X-Path`) |
-| `/api/files/download` | GET | Download any file (query: `path`) |
-| `/api/files/image` | GET | Get image file |
-| `/api/files/stats` | GET | Get file statistics |
-| `/api/files/upload` | POST | Upload file (headers: `X-Path`, `X-Filename`, body: raw binary) |
-| `/api/files/save` | POST | Save edited file `{"path": "...", "content": "..."}` |
-| `/api/files/delete` | POST | Delete file/directory `{"path": "..."}` |
-| `/api/files/mkdir` | POST | Create directory `{"path": "...", "name": "..."}` |
-| `/api/files/extract` | POST | Extract archive `{"path": "archive.zip"}` |
-| `/api/files/compress` | POST | Create zip `{"path": "...", "name": "...", "items": [...]}` |
-
-### Upload File Example
-
-```bash
-# Upload a file to /workspace/ on ACP server
-curl -u admin:secret -X POST "{ACP_URL}/api/files/upload" \
-  -H "X-Path: workspace" \
-  -H "X-Filename: output.txt" \
-  -H "Content-Type: application/octet-stream" \
-  --data-binary @/local/path/to/output.txt
-```
-
-### Save Text File Example
-
-```bash
-# Save text content directly
-POST {ACP_URL}/api/files/save {
-  "path": "workspace/report.md",
-  "content": "# Report\n\nContent here..."
-}
-```
-
-### View File Example
-
-```bash
-# View file content (returns JSON with content, lines, tokens)
-GET {ACP_URL}/api/files/view
-Header: X-Path: workspace/report.md
-
-# Response:
-{
-  "content": "file contents...",
-  "path": "workspace/report.md",
-  "lines": 150,
-  "tokens": 450,
-  "session_tokens": 45450
-}
-```
-
-### Workflow Recommendation
-
-1. **Log action** via `/api/action` before uploading
-2. **Upload files** to `/workspace/` on ACP server
-3. **Complete activity** with file path in result
-4. Human can access files via ACP web UI or download endpoints
 
 ---
 
@@ -412,43 +398,41 @@ POST /api/shell/add {"command": "...", "status": "completed", "output_preview": 
 POST /api/complete {"activity_id": "...", "result": "..."}
 
 # Nudge
-POST /api/nudge/ack {}                          # Acknowledge nudge
+GET  /api/nudge                                    # Check pending nudge (1.0.6)
+POST /api/nudge/ack {}                             # Acknowledge nudge
 
 # Control
-POST /api/stop                                  # Set stop flag
-POST /api/resume                                # Clear stop flag
+POST /api/stop {"reason": "..."}                   # Set stop flag
+POST /api/resume                                   # Clear stop flag
+POST /api/shutdown {"reason": "..."}               # Graceful session end
 
 # Context recovery
-GET  /api/summary                               # Session overview
-GET  /api/summary/export                        # Export to acp_session_summary.md
-GET  /api/notes                                 # Get saved notes
-POST /api/notes/add {"category": "...", "content": "..."}
+GET  /api/summary                                  # Session overview
+GET  /api/summary/export                           # Export to acp_session_summary.md
+GET  /api/notes                                    # Get saved notes
+POST /api/notes/add {"category": "...", "content": "...", "importance": "..."}
 POST /api/notes/clear
 
 # Utility
-GET  /api/all           # Combined status + history
-GET  /api/todos         # TODO list
-POST /api/todos/update  # Sync TODOs
-GET  /api/stats/duration                        # Performance analysis (v1.0.3)
-POST /api/activity/batch                        # Bulk operations (v1.0.3)
-POST /api/reset                                 # Full session reset (v1.0.4)
+GET  /api/all               # Combined status + history
+GET  /api/todos             # TODO list
+POST /api/todos/update      # Sync TODOs
+POST /api/todos/add         # Add single TODO
+POST /api/todos/toggle      # Toggle TODO status (1.0.6)
+POST /api/todos/clear       # Clear completed TODOs
+GET  /api/stats/duration    # Performance analysis (v1.0.3)
+POST /api/activity/batch    # Bulk operations (v1.0.3)
+POST /api/reset             # Full session reset (v1.0.4)
 
 # A2A
 GET  /api/agents
 GET  /api/agents/<name>
+POST /api/agents/unregister {"agent_name": "..."}
 POST /api/a2a/send
 GET  /api/a2a/history?to=<name>
 
-# Shutdown
-POST /api/shutdown                              # Graceful session end
-
-# File Management
-GET  /api/files/list            # List directory (header: X-Path)
-GET  /api/files/view            # View text file (header: X-Path)
-GET  /api/files/download?path=  # Download file
-POST /api/files/upload          # Upload binary (headers: X-Path, X-Filename)
-POST /api/files/save            # Save text {"path": "...", "content": "..."}
-POST /api/files/mkdir           # Create dir {"path": "...", "name": "..."}
+# CSRF / CORS
+GET  /api/csrf-token        # Check CSRF status / get token
 ```
 
 ---
@@ -468,7 +452,6 @@ POST /api/files/mkdir           # Create dir {"path": "...", "name": "..."}
 - [ ] Save notes and export summary before context compression
 - [ ] Ack shutdown nudge (`type: "shutdown"`) and stop further ACP calls
 - [ ] Use combined endpoint for efficiency: complete previous + start new in one call
-- [ ] **Upload files to `/workspace/`** on ACP server for centralized access
 
 ---
 
