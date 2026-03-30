@@ -378,6 +378,10 @@ interface SessionState {
   last_activity: number;
   nudge: Nudge | null;
   primary_agent: string | null;
+  /** Name of the agent that most recently logged an activity (default: "Unknown") */
+  last_agent?: string;
+  /** Model identifier from the most recent activity's metadata (default: "Unknown") */
+  last_model?: string;
   agent_tokens: Record<string, number>;
   files_read_tokens: Record<string, number>;
   // v1.0.4 fields
@@ -438,6 +442,18 @@ interface UpdateTodosRequest {
     status?: TODOStatus;     // Default: "pending"
     priority?: Priority;     // Default: "medium"
   }>;
+}
+
+/** POST /api/todos/toggle */
+interface ToggleTodoRequest {
+  id: string;
+}
+
+/** POST /api/todos/toggle */
+interface ToggleTodoResponse {
+  success: true;
+  todo: TODO;
+  toggled: boolean;
 }
 
 /** POST /api/todos/add */
@@ -599,6 +615,20 @@ interface AllResponse {
   tokens_remaining: number;
   tokens_percent: number;
   tunnel_url: string | null;
+  /** Extended fields returned by the implementation's polling endpoint */
+  primary_agent?: string | null;
+  last_agent?: string;
+  agent_tokens?: Record<string, number>;
+  session?: SessionInfo;
+  todos?: TODO[];
+  shell_history?: ShellEntry[];
+  errors?: Array<{message: string; timestamp: string}>;
+  agents?: Record<string, Agent>;
+  hints?: ActivityHints;
+  nudge?: Nudge | null;
+  orphan_warning?: OrphanWarning | null;
+  current_files?: string[];
+  base_dir?: string;
 }
 
 /** GET /api/activity/{id} */
@@ -844,6 +874,7 @@ const JsonRpcErrorCodes = {
   INTERNAL_ERROR:     -32603,
   TASK_NOT_FOUND:     -32001,
   TASK_NOT_RUNNING:   -32002,
+  STOP_REQUESTED:     -32003,
 } as const;
 
 /** JSON-RPC methods supported by ACP. */
@@ -855,7 +886,10 @@ type JsonRpcMethod =
   | "CancelTask"
   | "activity/start"
   | "activity/complete"
+  | "todos/get"
   | "todos/update"
+  | "status/get"
+  | "nudge/set"
   | "stop/set"
   | "session/reset";
 
@@ -1078,6 +1112,7 @@ export type {
   ShutdownRequest,
   UpdateTodosRequest,
   AddTodoRequest,
+  ToggleTodoRequest,
   AddShellEntryRequest,
   AddNoteRequest,
   CreateNudgeRequest,
@@ -1104,6 +1139,7 @@ export type {
   ShutdownResponse,
   ResetResponse,
   TodosResponse,
+  ToggleTodoResponse,
   ShellResponse,
   SummaryResponse,
   ExportSummaryResponse,

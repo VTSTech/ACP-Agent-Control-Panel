@@ -106,7 +106,7 @@ def load_data():
         "summary": "Session Reset.",
         "session_start": SESSION_START,
         "agent_tokens": {},
-        "shell_log": [],
+        "shell_history": [],
         "errors": [],
         # NEW 1.0.4 fields
         "agents": {},           # Agent Registry
@@ -431,7 +431,7 @@ def reset_state():
         "summary": "Session Reset.",
         "session_start": time.time(),
         "agent_tokens": {},
-        "shell_log": [],
+        "shell_history": [],
         "errors": [],
         # 1.0.4 fields
         "agents": {},
@@ -765,9 +765,9 @@ _UI = """<!DOCTYPE html>
 
         // Shell
         const sp = document.getElementById('shell-panel');
-        if (d.shell_log && d.shell_log.length) {
-            const shellBody = d.shell_log.slice(0,10).map(s => '<div class="shell-item"><span class="shell-cmd" title="'+esc(s.command||'')+'">'+esc(s.command||'---')+'</span><span class="shell-status '+(s.status==='error'?'status-error':'status-completed')+'">'+s.status+'</span></div>').join('');
-            patchPanel(sp, '&#x1F4BB; Shell ('+d.shell_log.length+')', shellBody, 'padding:0');
+        if (d.shell_history && d.shell_history.length) {
+            const shellBody = d.shell_history.slice(0,10).map(s => '<div class="shell-item"><span class="shell-cmd" title="'+esc(s.command||'')+'">'+esc(s.command||'---')+'</span><span class="shell-status '+(s.status==='error'?'status-error':'status-completed')+'">'+s.status+'</span></div>').join('');
+            patchPanel(sp, '&#x1F4BB; Shell ('+d.shell_history.length+')', shellBody, 'padding:0');
         } else { sp.innerHTML = ''; }
 
         // Hints
@@ -941,7 +941,7 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
                 "nudge": d["nudge"],
                 "session": get_session_info(),
                 "todos": d.get("todos", []),
-                "shell_log": d.get("shell_log", [])[-10:],
+                "shell_history": d.get("shell_history", [])[-10:],
                 "errors": d.get("errors", []),
                 "orphan_warning": {"count": len(orphans), "tasks": orphans} if orphans else None,
                 "current_files": current_files,
@@ -982,7 +982,7 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
         # /api/shell — spec §4.5
         elif self.path == '/api/shell':
             d = load_data()
-            self.send_json({"success": True, "shell": d.get("shell_log", [])})
+            self.send_json({"success": True, "shell_history": d.get("shell_history", [])})
 
         # /api/summary — spec §4.6 (structured response)
         elif self.path == '/api/summary':
@@ -1560,7 +1560,7 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             d = load_data()
             stats = {
                 "history_cleared": len(d.get("history", [])),
-                "shell_cleared": len(d.get("shell_log", [])),
+                "shell_cleared": len(d.get("shell_history", [])),
                 "todos_cleared": len(d.get("todos", [])),
                 "agents_cleared": len(d.get("agents", {})),
                 "a2a_cleared": len(d.get("a2a_messages", [])),
@@ -1688,17 +1688,17 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
                 entry["metadata"] = {"agent_name": body.get("agent_name"), "tool": body.get("tool")}
             if body.get("metadata"):
                 entry["metadata"] = body["metadata"]
-            d["shell_log"].append(entry)
-            if len(d["shell_log"]) > 200:
-                d["shell_log"] = d["shell_log"][-200:]
+            d["shell_history"].append(entry)
+            if len(d["shell_history"]) > 200:
+                d["shell_history"] = d["shell_history"][-200:]
             save_data(d)
             self.send_json({"success": True, "entry": entry})
 
         # /api/shell/clear
         elif self.path == '/api/shell/clear':
             d = load_data()
-            cleared = len(d["shell_log"])
-            d["shell_log"] = []
+            cleared = len(d["shell_history"])
+            d["shell_history"] = []
             save_data(d)
             self.send_json({"success": True, "cleared": cleared})
 
@@ -1811,6 +1811,27 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             # Add to queue
             d.setdefault("a2a_messages", []).insert(0, msg)
             
+            # Update contexts mapping if a2a H-A2A conversation context is active
+            context_id = body.get("contextId")
+            if context_id:
+                contexts = d.setdefault("contexts", {})
+                if context_id not in contexts:
+                    contexts[context_id] = {
+                        "contextId": context_id,
+                        "created": time.time(),
+                        "last_activity": time.time(),
+                        "agents": list({from_agent, to_agent}),
+                        "tasks": [msg["id"]]
+                    }
+                else:
+                    ctx = contexts[context_id]
+                    ctx["last_activity"] = time.time()
+                    for agent_name in (from_agent, to_agent):
+                        if agent_name and agent_name not in ctx["agents"]:
+                            ctx["agents"].append(agent_name)
+                    if msg["id"] not in ctx["tasks"]:
+                        ctx["tasks"].append(msg["id"])
+            
             # Limit queue size
             if len(d["a2a_messages"]) > 500:
                 d["a2a_messages"] = d["a2a_messages"][:500]
@@ -1885,6 +1906,29 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             )
             
             d.setdefault("a2a_messages", []).insert(0, msg)
+            
+            # Update contexts mapping if contextId provided
+            context_id = params.get("contextId")
+            if context_id:
+                from_agent = params.get("from_agent", "Unknown")
+                contexts = d.setdefault("contexts", {})
+                if context_id not in contexts:
+                    contexts[context_id] = {
+                        "contextId": context_id,
+                        "created": time.time(),
+                        "last_activity": time.time(),
+                        "agents": list({from_agent, to_agent}),
+                        "tasks": [msg["id"]]
+                    }
+                else:
+                    ctx = contexts[context_id]
+                    ctx["last_activity"] = time.time()
+                    for agent_name in (from_agent, to_agent):
+                        if agent_name and agent_name not in ctx["agents"]:
+                            ctx["agents"].append(agent_name)
+                    if msg["id"] not in ctx["tasks"]:
+                        ctx["tasks"].append(msg["id"])
+            
             save_data(d)
             
             # Return A2A Task format

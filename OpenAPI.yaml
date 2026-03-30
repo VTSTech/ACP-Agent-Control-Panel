@@ -399,6 +399,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SuccessResponse'
+  /api/todos/toggle:
+    post:
+      summary: Toggle a TODO item's status between pending and completed
+      operationId: toggleTodo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id
+              properties:
+                id:
+                  type: string
+                  description: TODO item ID to toggle
+      responses:
+        '200':
+          description: TODO toggled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  todo:
+                    $ref: '#/components/schemas/TODO'
+                  toggled:
+                    type: boolean
 
   # ==================== Shell History Endpoints ====================
   /api/shell:

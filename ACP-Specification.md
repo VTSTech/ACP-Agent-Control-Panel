@@ -194,6 +194,13 @@ The complete session state is stored in a single JSON file:
 | `agent_tokens` | Token usage breakdown per agent name |
 | `files_read_tokens` | Tracks files already counted for token deduplication |
 
+#### Session Metadata Fields
+
+| Field | Description |
+|-------|-------------|
+| `last_agent` | Name of the agent that most recently logged an activity (default: `"Unknown"`) |
+| `last_model` | Model identifier from the most recent activity's metadata (default: `"Unknown"`) |
+
 #### A2A Fields (1.0.4)
 
 | Field | Description |
@@ -682,7 +689,7 @@ List completed activity history (most recent first).
 
 #### GET /api/all
 
-Convenience endpoint that returns status, running, history, and tokens in one call.
+Convenience endpoint that returns status, running, history, tokens, and session metadata in one call. Used by the ACP web UI for polling.
 
 **Response:**
 ```json
@@ -696,9 +703,39 @@ Convenience endpoint that returns status, running, history, and tokens in one ca
   "context_window": 200000,
   "tokens_remaining": 155000,
   "tokens_percent": 22.5,
-  "tunnel_url": "https://xxx.trycloudflare.com"
+  "tunnel_url": "https://xxx.trycloudflare.com",
+  "primary_agent": "Super Z",
+  "last_agent": "Super Z",
+  "agent_tokens": {"Super Z": 42000, "LocalClaw": 500},
+  "session": { "<SessionInfo>" },
+  "todos": ["<TODO>", "..."],
+  "shell_history": ["<ShellEntry>", "..."],
+  "errors": [],
+  "agents": {"Super Z": {"<Agent>"}, "LocalClaw": {"<Agent>"}},
+  "hints": { "<ActivityHints>" },
+  "nudge": null,
+  "orphan_warning": null,
+  "current_files": ["file1.py", "file2.md"],
+  "base_dir": "/path/to/workspace"
 }
 ```
+
+**Extended Fields (beyond base status):**
+| Field | Description |
+|-------|-------------|
+| `primary_agent` | Name of the primary agent |
+| `last_agent` | Most recent agent to log an activity |
+| `agent_tokens` | Per-agent token breakdown |
+| `session` | Session info with timeout tracking |
+| `todos` | Current TODO list |
+| `shell_history` | Last 10 shell commands |
+| `errors` | Recent error log entries |
+| `agents` | Registered agents from Agent Registry |
+| `hints` | Activity hints for the most recent action |
+| `nudge` | Pending nudge (primary agent only) |
+| `orphan_warning` | Orphaned running activities |
+| `current_files` | Files accessed in current session |
+| `base_dir` | Base directory for file operations |
 
 #### GET /api/activity/{activity_id}
 
@@ -1142,6 +1179,31 @@ Add single TODO item.
 #### POST /api/todos/clear
 
 Clear completed TODOs.
+
+#### POST /api/todos/toggle
+
+Toggle a TODO item's status between `pending` and `completed`.
+
+**Request:**
+```json
+{
+  "id": "143052-a1b2c3"
+}
+```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | Yes | TODO item ID to toggle |
+
+**Response:**
+```json
+{
+  "success": true,
+  "todo": {"<TODO>"},
+  "toggled": true
+}
+```
 
 ### 4.5 Shell History Endpoints
 
@@ -2165,7 +2227,7 @@ A2A Agent Card discovery endpoint. Returns the server's Agent Card describing ca
 
 #### SendMessage Method
 
-Sends a message to another agent in A2A format.
+Sends a message to another agent. Uses flat parameters mapped from the A2A `SendMessage` method to ACP's internal message format.
 
 **Request:**
 ```json
@@ -2173,42 +2235,58 @@ Sends a message to another agent in A2A format.
   "jsonrpc": "2.0",
   "method": "SendMessage",
   "params": {
-    "message": {
-      "contextId": "ctx-abc123",
-      "parts": [
-        {"text": "Analyze this Python file for bugs"},
-        {"data": {"file_path": "/project/main.py"}}
-      ],
-      "metadata": {
-        "target_agent": "LocalClaw",
-        "action": "analyze_file"
-      }
-    }
+    "from_agent": "Super Z",
+    "to_agent": "LocalClaw",
+    "type": "request",
+    "action": "analyze_file",
+    "payload": {"file_path": "/project/main.py"},
+    "contextId": "ctx-abc123",
+    "priority": "normal",
+    "ttl": 3600,
+    "reply_to": null
   },
   "id": "req-1"
 }
 ```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `to_agent` | string | Yes | Recipient agent name |
+| `from_agent` | string | No | Sender agent name (default: `"Unknown"`) |
+| `type` | string | No | `request`, `response`, or `notification` (default: `"request"`) |
+| `action` | string | No | Action to perform (for requests) |
+| `payload` | object | No | Message data/parameters |
+| `contextId` | string | No | A2A context ID for multi-turn sessions |
+| `priority` | string | No | `normal`, `high`, or `urgent` (default: `"normal"`) |
+| `ttl` | integer | No | Time-to-live in seconds (default: `3600`) |
+| `reply_to` | string | No | Message ID this is replying to |
 
 **Response:**
 ```json
 {
   "jsonrpc": "2.0",
   "result": {
-    "task": {
-      "id": "143052-abc123",
-      "contextId": "ctx-abc123",
-      "status": {
-        "state": "COMPLETED",
-        "timestamp": "2025-01-15T14:30:52"
-      },
-      "history": [],
-      "artifacts": [],
-      "metadata": {"messageId": "msg-xyz789"}
+    "id": "143052-abc123",
+    "contextId": "ctx-abc123",
+    "status": {
+      "state": "COMPLETED",
+      "timestamp": "2025-01-15T14:30:52"
+    },
+    "history": [],
+    "artifacts": [],
+    "metadata": {
+      "action": "A2A",
+      "target": "Super Z → LocalClaw",
+      "tokens_in": 0,
+      "tokens_out": 0
     }
   },
   "id": "req-1"
 }
 ```
+
+**Note:** ACP maps the standard A2A `SendMessage` method to flat parameters rather than the nested `message.parts` / `message.metadata` structure. Implementers may support either format; the flat format is the reference.
 
 #### GetTask Method
 

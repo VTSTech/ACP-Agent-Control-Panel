@@ -86,7 +86,7 @@ Open `http://localhost:8766` in your browser.
 | `/api/shell` | GET | Shell command history |
 | `/api/shell/add` | POST | Add shell command |
 | `/api/summary` | GET | Structured session summary |
-| `/api/summary/export` | POST | Export to markdown file |
+| `/api/summary/export` | GET | Export to markdown file |
 
 ### Agent Registry (v1.0.4)
 
@@ -178,7 +178,7 @@ curl -u admin:secret -X POST http://localhost:8766/api/todos/update \
   -d '{"todos":[{"id":"1","content":"Task 1","status":"pending","priority":"high"}]}'
 
 # Export session summary
-curl -u admin:secret -X POST http://localhost:8766/api/summary/export
+curl -u admin:secret http://localhost:8766/api/summary/export
 ```
 
 ## Configuration
