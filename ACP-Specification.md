@@ -2882,11 +2882,28 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 ## Appendix B: Changelog
 
 ### 1.0.6 (Current)
+- **NEW**: `ACP-API.ts` — TypeScript type definition file providing AI-readable API types for all endpoints, request/response interfaces, enums, and data models
+- **NEW**: `POST /api/todos/toggle` — Toggle a TODO item's status between pending and completed by ID
+- **NEW**: `GET /api/nudge` — Check if a nudge is pending; returns `{nudge, has_pending}` for polling support
+- **NEW**: `do_OPTIONS` CORS preflight handler — returns `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, and `Access-Control-Allow-Headers` headers for browser-based cross-origin requests
+- **NEW**: `sanitize_path()` function — path traversal prevention using `os.path.realpath()` to validate all file endpoint paths remain within the configured base directory
+- **NEW**: `last_agent` and `last_model` session metadata fields — track the most recent agent name and model identifier across all activities
+- **NEW**: `shell_history` array in session state and `/api/all` response — persistent shell command history with command, timestamp, status, and output preview
+- **NEW**: `GET /api/shell`, `POST /api/shell/add`, `POST /api/shell/clear` — Shell command history management endpoints
 - **FIX**: Session State §3.1 `startup_applied` renamed to `startup_tokens` — resolves internal inconsistency with §4.3 API response
 - **FIX**: `contexts` auto-created when SendMessage is called without `contextId` (spec §3.8 compliance)
-- **FIX**: Agent Card URL now dynamically constructed from request headers instead of hardcoded empty string
-- **FIX**: All files synchronized to v1.0.6 (acp-minimal.py, OpenAPI.yaml, sub-agent-acp-template.md)
-- **DOC**: Added changelog entry for 1.0.6
+- **FIX**: Agent Card URL now dynamically constructed from request headers (`Host`, `X-Forwarded-Proto`) instead of hardcoded empty string
+- **FIX**: Path traversal vulnerability in file manager endpoints (`/api/files/list`, `/api/files/view`, `/api/files/download`, `/api/files/stats`) — all paths now validated against base directory
+- **FIX**: `POST /api/nudge/ack` now clears the nudge by setting `d["nudge"] = None` instead of merely marking it `acknowledged`
+- **FIX**: `/api/restart` now saves session state and flushes the HTTP response before calling `os.execv`, preventing data loss and connection reset errors
+- **FIX**: Missing `import sys` — `/api/restart` crashed with `NameError` when calling `sys.executable`
+- **FIX**: Undefined variable `sg` in A2A context creation — `/api/a2a/send` and JSON-RPC `SendMessage` crashed with `NameError`; corrected to `msg`
+- **DOC**: Added Session Metadata Fields table documenting `last_agent` and `last_model`
+- **DOC**: Updated `/api/all` response schema with `last_agent`, `last_model`, and `shell_history` fields
+- **DOC**: Added `POST /api/todos/toggle` endpoint documentation with TypeScript interfaces in OpenAPI.yaml
+- **DOC**: All files synchronized to v1.0.6 (acp-minimal.py, OpenAPI.yaml, ACP-API.ts, sub-agent-acp-template.md, README.md, SKILL.md)
+- **SEC**: Path traversal prevention added to all file manager endpoints (§7.4 compliance)
+- **SEC**: CORS preflight support enables browser-based API consumption from different origins
 
 ### 1.0.5
 - **NEW**: `primary_agent` field in `/api/whoami` response - agents can check if they own the context
