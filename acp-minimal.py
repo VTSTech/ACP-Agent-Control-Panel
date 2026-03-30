@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ACP Minimal v1.0.5 - Full Spec Compliance
+ACP Minimal v1.0.6 - Full Spec Compliance
 
 Endpoints: whoami, status, history, running, activity/{id}, action, start, complete,
            stop, resume, clear_history, reset, reset_session, shutdown, restart,
@@ -12,6 +12,11 @@ Endpoints: whoami, status, history, running, activity/{id}, action, start, compl
            stats/duration, activity/batch,
            session, session/refresh, csrf-token,
            files/list, files/view, files/download, files/stats (read-only)
+           
+NEW in 1.0.6:
+           contextId auto-created when SendMessage called without contextId
+           Agent Card URL dynamically set from request headers
+           All files synchronized to v1.0.6
            
 NEW in 1.0.5:
            primary_agent in /api/whoami response
@@ -57,7 +62,7 @@ ACP_AGENT_CARD = {
     "name": "ACP Server",
     "description": "Agent Control Panel - Monitoring and observability server for AI agents",
     "url": "",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "capabilities": {
         "streaming": False,
         "pushNotifications": False
@@ -479,7 +484,7 @@ _UI = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>ACP Minimal v1.0.5</title>
+    <title>ACP Minimal v1.0.6</title>
     <style>
         :root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#c9d1d9; --primary:#ff6b35; --success:#238636; --danger:#da3633; --warning:#d29922; --info:#58a6ff; }
         body { font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); margin:0; padding:20px; }
@@ -543,7 +548,7 @@ _UI = """<!DOCTYPE html>
 <div class="container">
     <div class="header">
         <div>
-            <h2 style="margin:0;color:var(--primary)">&#x1F916; ACP Minimal <small style="color:#6e7681;font-size:0.8rem">v1.0.5</small></h2>
+            <h2 style="margin:0;color:var(--primary)">&#x1F916; ACP Minimal <small style="color:#6e7681;font-size:0.8rem">v1.0.6</small></h2>
             <div id="timer" style="font-family:monospace;font-size:0.8rem;color:#8b949e;margin-top:4px">Sync in 2.0s</div>
         </div>
         <div class="sys-controls">
@@ -853,7 +858,12 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
 
         # /.well-known/agent-card.json — 1.0.4 A2A Discovery
         elif self.path == '/.well-known/agent-card.json':
-            self.send_json(ACP_AGENT_CARD)
+            # Dynamic URL from request headers
+            host = self.headers.get('Host', f'localhost:{PORT}')
+            scheme = 'https' if self.headers.get('X-Forwarded-Proto', '').lower() == 'https' else 'http'
+            card = dict(ACP_AGENT_CARD)
+            card["url"] = f"{scheme}://{host}"
+            self.send_json(card)
 
         # /api/whoami — spec §4.10: returns identity context for agent bootstrap
         elif self.path == '/api/whoami':
@@ -1811,26 +1821,25 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             # Add to queue
             d.setdefault("a2a_messages", []).insert(0, msg)
             
-            # Update contexts mapping if a2a H-A2A conversation context is active
-            context_id = body.get("contextId")
-            if context_id:
-                contexts = d.setdefault("contexts", {})
-                if context_id not in contexts:
-                    contexts[context_id] = {
-                        "contextId": context_id,
-                        "created": time.time(),
-                        "last_activity": time.time(),
-                        "agents": list({from_agent, to_agent}),
-                        "tasks": [msg["id"]]
-                    }
-                else:
-                    ctx = contexts[context_id]
-                    ctx["last_activity"] = time.time()
-                    for agent_name in (from_agent, to_agent):
-                        if agent_name and agent_name not in ctx["agents"]:
-                            ctx["agents"].append(agent_name)
-                    if msg["id"] not in ctx["tasks"]:
-                        ctx["tasks"].append(msg["id"])
+            # Update contexts mapping (auto-create per spec §3.8)
+            context_id = body.get("contextId") or make_context_id()
+            contexts = d.setdefault("contexts", {})
+            if context_id not in contexts:
+                contexts[context_id] = {
+                    "contextId": context_id,
+                    "created": time.time(),
+                    "last_activity": time.time(),
+                    "agents": list({from_agent, to_agent}),
+                    "tasks": [msg["id"]]
+                }
+            else:
+                ctx = contexts[context_id]
+                ctx["last_activity"] = time.time()
+                for agent_name in (from_agent, to_agent):
+                    if agent_name and agent_name not in ctx["agents"]:
+                        ctx["agents"].append(agent_name)
+                if msg["id"] not in ctx["tasks"]:
+                    ctx["tasks"].append(msg["id"])
             
             # Limit queue size
             if len(d["a2a_messages"]) > 500:
@@ -1894,8 +1903,11 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             if not to_agent:
                 return send_error(JSONRPC_INVALID_PARAMS, "'to_agent' is required")
             
+            from_agent = params.get("from_agent", "Unknown")
+            context_id = params.get("contextId") or make_context_id()
+            
             msg = create_a2a_message(
-                from_agent=params.get("from_agent", "Unknown"),
+                from_agent=from_agent,
                 to_agent=to_agent,
                 msg_type=params.get("type", "request"),
                 action=params.get("action"),
@@ -1907,27 +1919,24 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             
             d.setdefault("a2a_messages", []).insert(0, msg)
             
-            # Update contexts mapping if contextId provided
-            context_id = params.get("contextId")
-            if context_id:
-                from_agent = params.get("from_agent", "Unknown")
-                contexts = d.setdefault("contexts", {})
-                if context_id not in contexts:
-                    contexts[context_id] = {
-                        "contextId": context_id,
-                        "created": time.time(),
-                        "last_activity": time.time(),
-                        "agents": list({from_agent, to_agent}),
-                        "tasks": [msg["id"]]
-                    }
-                else:
-                    ctx = contexts[context_id]
-                    ctx["last_activity"] = time.time()
-                    for agent_name in (from_agent, to_agent):
-                        if agent_name and agent_name not in ctx["agents"]:
-                            ctx["agents"].append(agent_name)
-                    if msg["id"] not in ctx["tasks"]:
-                        ctx["tasks"].append(msg["id"])
+            # Update contexts mapping (auto-create per spec §3.8)
+            contexts = d.setdefault("contexts", {})
+            if context_id not in contexts:
+                contexts[context_id] = {
+                    "contextId": context_id,
+                    "created": time.time(),
+                    "last_activity": time.time(),
+                    "agents": list({from_agent, to_agent}),
+                    "tasks": [msg["id"]]
+                }
+            else:
+                ctx = contexts[context_id]
+                ctx["last_activity"] = time.time()
+                for agent_name in (from_agent, to_agent):
+                    if agent_name and agent_name not in ctx["agents"]:
+                        ctx["agents"].append(agent_name)
+                if msg["id"] not in ctx["tasks"]:
+                    ctx["tasks"].append(msg["id"])
             
             save_data(d)
             
@@ -2167,7 +2176,7 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
 
 # --- MAIN ---
 if __name__ == "__main__":
-    print(f"🤖 ACP Minimal v1.0.4 starting on port {PORT}")
+    print(f"🤖 ACP Minimal v1.0.6 starting on port {PORT}")
     print(f"   Auth: {AUTH_USER} / {AUTH_PASS}")
     print(f"   Features: Activity Monitor + File Manager + A2A Messaging + JSON-RPC")
     server = HTTPServer(('0.0.0.0', PORT), ACPMinimalHandler)

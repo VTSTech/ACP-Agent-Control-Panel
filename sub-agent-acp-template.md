@@ -1,6 +1,6 @@
 # Sub-Agent ACP Integration Template
 
-**Version:** 1.0.0
+**Version:** 1.0.6
 **Purpose:** Enable sub-agents to log activities to ACP for multi-agent attribution
 
 ---

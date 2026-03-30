@@ -370,7 +370,7 @@ interface SessionState {
   stop_flag: boolean;
   stop_reason: string | null;
   session_tokens: number;
-  startup_applied: boolean;
+  startup_tokens: number;
   todos: TODO[];
   shell_history: ShellEntry[];
   ai_notes: Note[];

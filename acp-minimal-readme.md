@@ -2,7 +2,7 @@
 
 A barebones implementation of the [ACP (Agent Control Panel) Specification](https://github.com/VTSTech/ACP-Agent-Control-Panel) with a basic web UI.
 
-**Version:** v1.0.5 | **~1000 lines** of Python with no external dependencies.
+**Version:** v1.0.6 | **~1000 lines** of Python with no external dependencies.
 
 ## Features
 

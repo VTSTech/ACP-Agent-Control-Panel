@@ -5,13 +5,13 @@ info:
     The Agent Control Panel (ACP) is a monitoring and observability protocol for AI agents.
     It provides a standardized RESTful HTTP API to monitor, control, and recover AI agent sessions.
 
-    **Version:** 1.0.5
+    **Version:** 1.0.6
     **Status:** Draft
     **Authors:** VTSTech, Community Contributors
     **A2A Compliance:** JSON-RPC 2.0, Agent Card, contextId support
 
     For more details, see the [full specification](https://github.com/VTSTech/ACP-Agent-Control-Panel).
-  version: 1.0.5
+  version: 1.0.6
   contact:
     name: VTSTech
     url: https://github.com/VTSTech
