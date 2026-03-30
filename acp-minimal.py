@@ -31,7 +31,7 @@ NEW in 1.0.4:
 A2A Compliance: JSON-RPC 2.0, Agent Card, contextId support
 """
 
-import json, os, base64, time, signal, threading, uuid
+import json, os, sys, base64, time, signal, threading, uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs
@@ -47,6 +47,16 @@ SESSION_TIMEOUT = int(os.environ.get("ACP_SESSION_TIMEOUT", "86400"))
 ORPHAN_TIMEOUT  = int(os.environ.get("ACP_ORPHAN_TIMEOUT", "300"))
 
 SESSION_START = time.time()
+
+def sanitize_path(base_dir, rel_path):
+    """Prevent path traversal attacks. Returns resolved path or None if outside base_dir."""
+    abs_base = os.path.realpath(base_dir)
+    if not rel_path:
+        return abs_base
+    target = os.path.realpath(os.path.join(base_dir, rel_path))
+    if not target.startswith(abs_base + os.sep) and target != abs_base:
+        return None
+    return target
 
 # --- JSON-RPC 2.0 Error Codes ---
 JSONRPC_PARSE_ERROR = -32700
@@ -843,6 +853,17 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
         return {}
 
     # ============================================================
+    # OPTIONS (CORS preflight)
+    # ============================================================
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Authorization, Content-Type')
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+
+    # ============================================================
     # GET
     # ============================================================
     def do_GET(self):
@@ -1023,6 +1044,16 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
         elif self.path == '/api/session':
             self.send_json({"success": True, "session": get_session_info()})
 
+        # /api/nudge — spec §3.9: check pending nudge (GET)
+        elif self.path == '/api/nudge':
+            d = load_data()
+            nudge = d.get("nudge")
+            self.send_json({
+                "success": True,
+                "nudge": nudge,
+                "has_pending": nudge is not None
+            })
+
         # /api/csrf-token — spec §4.2
         elif self.path == '/api/csrf-token':
             self.send_json({
@@ -1105,7 +1136,11 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             
             if action == 'list':
                 try:
-                    path = base_dir if len(parts) == 1 else os.path.join(base_dir, *parts[1:])
+                    rel = '/'.join(parts[1:]) if len(parts) > 1 else ''
+                    path = sanitize_path(base_dir, rel)
+                    if path is None:
+                        self.send_json({"success": False, "error": "Path traversal denied"}, 403)
+                        return
                     items = []
                     for item in sorted(os.listdir(path))[:50]:
                         ip = os.path.join(path, item)
@@ -1122,7 +1157,10 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             elif action == 'view':
                 try:
                     rel_path = '/'.join(parts[1:])
-                    path = os.path.join(base_dir, rel_path)
+                    path = sanitize_path(base_dir, rel_path)
+                    if path is None:
+                        self.send_json({"success": False, "error": "Path traversal denied"}, 403)
+                        return
                     if os.path.isfile(path):
                         with open(path, 'r', encoding='utf-8') as f:
                             content = f.read(100000)  # 100KB limit
@@ -1135,7 +1173,10 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             elif action == 'download':
                 try:
                     rel_path = '/'.join(parts[1:])
-                    path = os.path.join(base_dir, rel_path)
+                    path = sanitize_path(base_dir, rel_path)
+                    if path is None:
+                        self.send_json({"success": False, "error": "Path traversal denied"}, 403)
+                        return
                     if os.path.isfile(path):
                         with open(path, 'rb') as f:
                             content = f.read()
@@ -1153,7 +1194,10 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
             elif action == 'stats':
                 try:
                     rel_path = '/'.join(parts[1:])
-                    path = os.path.join(base_dir, rel_path)
+                    path = sanitize_path(base_dir, rel_path)
+                    if path is None:
+                        self.send_json({"success": False, "error": "Path traversal denied"}, 403)
+                        return
                     if os.path.exists(path):
                         self.send_json({
                             "success": True,
@@ -1538,7 +1582,9 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
 
         # /api/restart
         elif self.path == '/api/restart':
+            save_data(load_data())
             self.send_json({"success": True, "message": "Restarting server..."})
+            self.wfile.flush()
             os.execv(sys.executable, [sys.executable] + sys.argv)
 
         # /api/clear_history
@@ -1601,9 +1647,9 @@ class ACPMinimalHandler(BaseHTTPRequestHandler):
         elif self.path == '/api/nudge/ack':
             d = load_data()
             if d.get("nudge"):
-                d["nudge"]["acknowledged"] = True
+                d["nudge"] = None
                 save_data(d)
-                self.send_json({"success": True, "message": "Nudge acknowledged"})
+                self.send_json({"success": True, "message": "Nudge acknowledged and cleared"})
             else:
                 self.send_json({"success": True, "message": "No nudge to acknowledge"})
 
