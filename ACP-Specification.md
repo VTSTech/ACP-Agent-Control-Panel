@@ -162,7 +162,7 @@ The complete session state is stored in a single JSON file:
   "stop_flag": false,
   "stop_reason": null,
   "session_tokens": 45000,
-  "startup_applied": true,
+  "startup_tokens": 3000,
   "todos": ["<TODO>", "..."],
   "shell_history": ["<ShellEntry>", "..."],
   "ai_notes": ["<Note>", "..."],
@@ -2881,7 +2881,14 @@ See `VTSTech-GLMACP.py` for a complete reference implementation in Python.
 
 ## Appendix B: Changelog
 
-### 1.0.5 (Current)
+### 1.0.6 (Current)
+- **FIX**: Session State §3.1 `startup_applied` renamed to `startup_tokens` — resolves internal inconsistency with §4.3 API response
+- **FIX**: `contexts` auto-created when SendMessage is called without `contextId` (spec §3.8 compliance)
+- **FIX**: Agent Card URL now dynamically constructed from request headers instead of hardcoded empty string
+- **FIX**: All files synchronized to v1.0.6 (acp-minimal.py, OpenAPI.yaml, sub-agent-acp-template.md)
+- **DOC**: Added changelog entry for 1.0.6
+
+### 1.0.5
 - **NEW**: `primary_agent` field in `/api/whoami` response - agents can check if they own the context
 - **NEW**: Nudges delivered only to primary agent - prevents context pollution in multi-agent environments
 - **NEW**: §4.11 Primary Agent Delivery section - documents nudge delivery behavior
