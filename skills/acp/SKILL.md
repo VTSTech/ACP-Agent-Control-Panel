@@ -45,7 +45,11 @@ Execute on every session start / context resume:
 3. POST {ACP_URL}/api/agents/register {"agent_name": "Super Z", "capabilities": [...], "model_name": "..."}
 4. GET  {ACP_URL}/api/todos        → Restore TODO state from previous session
 5. POST {ACP_URL}/api/action {"action": "CHAT", "target": "Session bootstrap", "metadata": {"agent_name": "Super Z"}}
+   → save activity_id from response
+6. POST {ACP_URL}/api/complete {"activity_id": "<id from step 5>", "result": "Bootstrap complete"}
 ```
+
+**IMPORTANT:** Step 6 is mandatory — without it the bootstrap CHAT activity stays in `running[]` forever, causing `orphan_warning` on every subsequent action.
 
 **Response Fields (1.0.5):**
 
@@ -382,6 +386,7 @@ GET  /api/whoami
 POST /api/agents/register {"agent_name": "...", "capabilities": [...]}
 GET  /api/todos
 POST /api/action {"action": "CHAT", "target": "bootstrap", "metadata": {...}}
+POST /api/complete {"activity_id": "<id from above>", "result": "Bootstrap complete"}
 
 # Workflow (MANDATORY pattern)
 POST /api/action {"action": "READ", "target": "file.py", "metadata": {...}}
@@ -441,7 +446,7 @@ GET  /api/csrf-token        # Check CSRF status / get token
 
 - [ ] INVOKE THIS SKILL FIRST
 - [ ] Get `ACP_URL` from human
-- [ ] Bootstrap: status → whoami → register → todos → log
+- [ ] Bootstrap: status → whoami → register → todos → log → **complete**
 - [ ] Check `stop_flag` in `/api/status`; check `nudge`, `orphan_warning`, `hints` in every `/api/action` response
 - [ ] LOG before EXECUTE before COMPLETE (**MANDATORY - non-negotiable**)
 - [ ] Include `agent_name` in all metadata
