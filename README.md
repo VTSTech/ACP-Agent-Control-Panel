@@ -80,6 +80,9 @@ The full implementation includes everything in minimal plus:
 | **v1.0.5** Primary Agent in whoami | `primary_agent` field in `/api/whoami` response |
 | **v1.0.5** Nudge Delivery | Nudges delivered only to primary agent |
 | **v1.0.5** Context Isolation | Secondary agents receive `nudge: null` |
+| **v1.0.6** TODO Toggle | `POST /api/todos/toggle` endpoint |
+| **v1.0.6** Nudge Polling | `GET /api/nudge` check pending without logging |
+| **v1.0.6** CORS Support | CORS headers and OPTIONS preflight handling |
 
 
 ## API Reference
@@ -265,9 +268,10 @@ requests.post(f"{ACP_URL}/api/action", auth=AUTH, json={
 
 ## Documentation
 
-- **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification (v1.0.6)
-- **[ACP-Agent-Guide-MIN.md](./ACP-Agent-Guide-MIN.md)** - Quick reference for AI agents (v1.0.6)
-- **[ACP-Agent-Guide-MAX.md](./ACP-Agent-Guide-MAX.md)** - Complete integration guide with examples (v1.0.6)
+- **[skills/acp/SKILL.md](./skills/acp/SKILL.md)** - Agent skill file (v1.0.6, canonical agent reference)
+- **[ACP-Specification.md](./ACP-Specification.md)** - Full protocol specification
+- **[ACP-Human-Guide.md](./ACP-Human-Guide.md)** - Setup guide for human operators
+- **[OpenAPI.yaml](./OpenAPI.yaml)** - OpenAPI 3.0 specification
 
 ## Architecture
 
