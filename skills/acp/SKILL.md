@@ -299,6 +299,158 @@ POST {ACP_URL}/api/todos/clear                              # Clear completed TO
 
 ---
 
+## FILE MANAGER ENDPOINTS
+
+### GET /api/files/list
+
+List directory contents.
+
+**Headers:**
+- `X-Path`: Relative path from base directory
+- `X-Sort-By`: `name` | `date` | `size`
+- `X-Sort-Dir`: `asc` | `desc`
+
+### GET /api/files/view
+
+View file content (text files only, size limited).
+
+**Headers:**
+- `X-Path`: Relative path to file
+
+**Response:**
+```json
+{
+  "content": "file contents...",
+  "path": "path/to/file.py",
+  "lines": 150,
+  "tokens": 450,
+  "session_tokens": 45450
+}
+```
+
+### GET /api/files/download
+
+Download file (binary safe).
+
+**Query Parameters:**
+- `path`: Relative path to file
+
+### GET /api/files/image
+
+Get image file.
+
+### GET /api/files/stats
+
+Get file statistics (total files, directories, size).
+
+### POST /api/files/upload
+
+Upload file.
+
+**Headers:**
+- `X-Path`: Destination directory
+- `X-Filename`: File name
+- `Content-Type`: `application/octet-stream`
+
+**Body:** Raw binary file content
+
+### POST /api/files/save
+
+Save edited file.
+
+**Request:**
+```json
+{
+  "path": "path/to/file.py",
+  "content": "updated content..."
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Relative path to file |
+| `content` | string | Yes | File content to save |
+
+### POST /api/files/delete
+
+Delete file or directory.
+
+**Request:**
+```json
+{
+  "path": "path/to/delete"
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Relative path to file or directory to delete |
+
+### POST /api/files/mkdir
+
+Create directory.
+
+**Request:**
+```json
+{
+  "path": "parent/path",
+  "name": "new_directory"
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Parent directory path |
+| `name` | string | Yes | New directory name |
+
+### POST /api/files/extract
+
+Extract archive.
+
+**Request:**
+```json
+{
+  "path": "path/to/archive.zip"
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Relative path to archive file |
+
+**Supported formats:** `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.gz`, `.bz2`
+
+### POST /api/files/compress
+
+Create zip archive.
+
+**Request:**
+```json
+{
+  "path": "directory/path",
+  "name": "archive.zip",
+  "items": ["file1.py", "file2.py", "subdir/"]
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Base directory path |
+| `name` | string | Yes | Archive filename (should end in `.zip`) |
+| `items` | array | Yes | List of files/directories to include |
+
+---
+
 ## CONTEXT RECOVERY
 
 ### Before context compression
@@ -435,6 +587,19 @@ GET  /api/agents/<name>
 POST /api/agents/unregister {"agent_name": "..."}
 POST /api/a2a/send
 GET  /api/a2a/history?to=<name>
+
+# File Manager
+GET  /api/files/list             # List directory (X-Path, X-Sort-By, X-Sort-Dir headers)
+GET  /api/files/view             # View file content (X-Path header)
+GET  /api/files/download         # Download file (?path=...)
+GET  /api/files/image            # Get image file
+GET  /api/files/stats            # File statistics
+POST /api/files/upload           # Upload file (X-Path, X-Filename, Content-Type headers)
+POST /api/files/save             # Save edited file (JSON body: path, content)
+POST /api/files/delete           # Delete file/directory (JSON body: path)
+POST /api/files/mkdir            # Create directory (JSON body: path, name)
+POST /api/files/extract          # Extract archive (JSON body: path)
+POST /api/files/compress         # Create zip archive (JSON body: path, name, items)
 
 # CSRF / CORS
 GET  /api/csrf-token        # Check CSRF status / get token
