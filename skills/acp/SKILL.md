@@ -2,6 +2,9 @@
 name: acp
 description: "ACP Agent Control Panel - CRITICAL: Invoke this skill FIRST on every session start, context resume, or context reset. Required before any other work. Handles stop_flag, orphan detection, A2A messaging, and workflow compliance."
 argument-hint: "No arguments needed - just invoke to bootstrap ACP workflow"
+metadata:
+  author: VTSTech
+  version: "1.0.6"
 ---
 
 # ACP Skill (Minimal)
